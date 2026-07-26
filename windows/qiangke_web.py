@@ -13,10 +13,15 @@ import os
 import sys
 import json
 import time
+import queue
+import secrets
 import threading
+import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from contextlib import redirect_stdout
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 try:
     import webview
@@ -68,6 +73,22 @@ QUERY_CATS = [
 
 DEFAULT_BATCH = "77c2465143574415b3c76a820384eab1"
 BG_CANDIDATES = ("background.png", "background.jpg", "background.jpeg", "bg.png", "bg.jpg")
+
+# ---- 本地服务器 / 消息广播（取代不稳定的 pywebview js_api 桥接）----
+TOKEN = ""                       # 启动时随机生成，前端与服务器共享，防止本机其它程序访问
+_subs = []                       # 每个 SSE 连接一个队列
+_subs_lock = threading.Lock()
+
+
+def _emit(msg):
+    """把一条消息广播给所有已连接的 SSE 客户端。"""
+    data = json.dumps(msg, ensure_ascii=False)
+    with _subs_lock:
+        for q in list(_subs):
+            try:
+                q.put_nowait(data)
+            except Exception:
+                pass
 
 
 def resource_path(name):
@@ -565,23 +586,16 @@ class Api:
         self.engine = GrabEngine(self._log, self._event)
         self.run_thread = None
 
-    # ---- 主动推给前端 ----
-    def _eval(self, js):
-        if self.window is not None:
-            try:
-                self.window.evaluate_js(js)
-            except Exception:
-                pass
-
+    # ---- 主动推给前端（通过 SSE 广播，不再依赖 pywebview 桥接）----
     def _log(self, text):
         stamp = f"{datetime.now():%H:%M:%S}  {text}"
-        self._eval(f"window.appLog && appLog({json.dumps(stamp, ensure_ascii=False)})")
+        _emit({"t": "log", "text": stamp})
 
     def _event(self, kind, payload):
-        self._eval(f"window.appEvent && appEvent({json.dumps(kind)}, {json.dumps(payload, ensure_ascii=False)})")
+        _emit({"t": "event", "kind": kind, "payload": payload})
 
     def _push(self, fn, payload):
-        self._eval(f"window.{fn} && {fn}({json.dumps(payload, ensure_ascii=False)})")
+        _emit({"t": "push", "fn": fn, "payload": payload})
 
     # ---- 前端可调用 ----
     def start(self, cfg):
@@ -792,7 +806,109 @@ def _bg2_rule():
 def build_html():
     return (HTML.replace("__BG_RULE__", _bg_rule())
                 .replace("__BG2_RULE__", _bg2_rule())
-                .replace("__BATCH__", DEFAULT_BATCH))
+                .replace("__BATCH__", DEFAULT_BATCH)
+                .replace("__TOKEN__", TOKEN))
+
+
+# ============================ 本地 HTTP 服务器 ============================
+# 只监听 127.0.0.1（本机），/api 与 /events 需带正确 TOKEN 才受理。
+_ALLOWED = {"start", "stop", "query", "get_selected", "withdraw",
+            "get_batches", "get_timetable", "save_config", "load_config"}
+_API = None          # 在 main() 中赋值为 Api 实例
+
+
+class _Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *a):        # 静音，避免控制台刷屏
+        pass
+
+    def _send(self, code, body=b"", ctype="application/json; charset=utf-8", extra=None):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        if extra:
+            for k, v in extra.items():
+                self.send_header(k, v)
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def _json(self, code, obj):
+        self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+
+    def do_GET(self):
+        u = urlparse(self.path)
+        if u.path in ("/", "/index.html"):
+            self._send(200, build_html().encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if u.path == "/favicon.ico":       # 浏览器自动请求，无图标，静默 204
+            self._send(204)
+            return
+        if parse_qs(u.query).get("t", [""])[0] != TOKEN:
+            self._send(403); return
+        if u.path == "/events":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            q = queue.Queue(maxsize=2000)
+            with _subs_lock:
+                _subs.append(q)
+            try:
+                self.wfile.write(b": connected\n\n"); self.wfile.flush()
+                while True:
+                    try:
+                        data = q.get(timeout=15)
+                        self.wfile.write(("data: " + data + "\n\n").encode("utf-8"))
+                    except queue.Empty:
+                        self.wfile.write(b": ping\n\n")   # 心跳，探测断线
+                    self.wfile.flush()
+            except Exception:
+                pass
+            finally:
+                with _subs_lock:
+                    if q in _subs:
+                        _subs.remove(q)
+            return
+        self._send(404)
+
+    def do_POST(self):
+        u = urlparse(self.path)
+        if parse_qs(u.query).get("t", [""])[0] != TOKEN:
+            self._json(403, {"error": "forbidden"}); return
+        if not u.path.startswith("/api/"):
+            self._json(404, {"error": "not found"}); return
+        name = u.path[len("/api/"):]
+        if name not in _ALLOWED or _API is None:
+            self._json(400, {"error": "unknown method"}); return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except Exception:
+            length = 0
+        raw = self.rfile.read(length) if length else b"[]"
+        try:
+            args = json.loads(raw.decode("utf-8") or "[]")
+            if not isinstance(args, list):
+                args = [args]
+        except Exception:
+            args = []
+        try:
+            result = getattr(_API, name)(*args)
+        except Exception as e:
+            self._json(500, {"error": str(e)}); return
+        self._json(200, result if result is not None else {"ok": True})
+
+
+def start_server():
+    """在本机随机端口上启动服务器，返回 (server, port)。"""
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    srv.daemon_threads = True
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, port
 
 
 HTML = r"""<!DOCTYPE html>
@@ -1100,26 +1216,28 @@ function gatherCfg(){
     peak:peak,courses:courses};
 }
 
-// 统一的 API 调用：等待桥接就绪（打包 exe 冷启动时 pywebview 挂载较慢，这里耐心等待而不是提前报错）
-let _pwReady=false, _initHinted=false;
-window.addEventListener("pywebviewready",()=>{_pwReady=true;});
-function fnReady(name){
-  return window.pywebview && window.pywebview.api && typeof window.pywebview.api[name]==="function";
-}
+// 统一的 API 调用：走本地 HTTP（fetch），取代不稳的 pywebview 桥接。页面加载即可用，不再抽奖。
+const API_TOKEN="__TOKEN__";
 async function callApi(name,...args){
-  // 冷启动时桥接/方法可能还没挂上：耐心等待最多 ~40 秒，期间点击不会丢，就绪后自动执行
-  if(!fnReady(name)){
-    if(!_initHinted){ _initHinted=true; appLog("界面初始化中，请稍候…（首次启动会慢一些）"); }
-    let deadline=Date.now()+40000;
-    while(!fnReady(name) && Date.now()<deadline){ await new Promise(r=>setTimeout(r,60)); }
-  }
-  if(!fnReady(name)){
-    appLog("接口未就绪("+name+")：界面组件未能正常启动");
-    alert("界面初始化超时。\n多为系统缺少 Microsoft Edge WebView2 运行时，安装后重开即可；\n或稍等几秒再点一次。");
-    return null;
-  }
-  try{ return await window.pywebview.api[name](...args); }
-  catch(e){ appLog("调用出错("+name+")："+e); alert("调用出错："+e); return null; }
+  try{
+    let r=await fetch("/api/"+name+"?t="+API_TOKEN,{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(args)});
+    if(!r.ok){ appLog("调用出错("+name+")：HTTP "+r.status); return null; }
+    return await r.json();
+  }catch(e){ appLog("调用出错("+name+")："+e); return null; }
+}
+// 后端主动推送（日志/事件/回调）通过 SSE 收取；断线由 EventSource 自动重连
+function initEvents(){
+  try{
+    let es=new EventSource("/events?t="+API_TOKEN);
+    es.onmessage=function(ev){
+      let m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
+      if(m.t==="log"){ appLog(m.text); }
+      else if(m.t==="event"){ appEvent(m.kind,m.payload); }
+      else if(m.t==="push"){ let fn=window[m.fn]; if(typeof fn==="function") fn(m.payload); }
+    };
+  }catch(e){ appLog("事件通道初始化失败："+e); }
 }
 
 // 选课批次
@@ -1360,6 +1478,7 @@ window.appEvent=function(kind,payload){
     $("#status").textContent="空闲";$("#status").classList.remove("run");}
 };
 function esc(s){return String(s==null?"":s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+initEvents();   // 建立 SSE 事件通道（appLog/appEvent 已定义）
 </script>
 </body></html>
 """
@@ -1387,23 +1506,35 @@ def _dark_titlebar_later(title):
 
 
 def main():
-    if webview is None:
-        print("缺少依赖：请运行  pip install pywebview")
-        return
+    global TOKEN, _API
+    TOKEN = secrets.token_urlsafe(16)
     title = "YNU 抢课助手"
     api = Api()
-    win = webview.create_window(title, html=build_html(), js_api=api, width=1240, height=830,
+    _API = api
+
+    # 先在本机起服务器（界面/接口/推送都走它），窗口再加载这个本地地址
+    srv, port = start_server()
+    url = f"http://127.0.0.1:{port}/?t={TOKEN}"
+
+    if webview is None:
+        # 没装 pywebview 也能用：直接用系统默认浏览器打开，服务器保持运行
+        print(f"未检测到 pywebview，已在浏览器打开：{url}")
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            pass
+        return
+
+    win = webview.create_window(title, url=url, width=1240, height=830,
                                 min_size=(1060, 720), background_color="#0d0d13")
     api.window = win
     _dark_titlebar_later(title)
-    # 强制使用现代 EdgeChromium(WebView2) 引擎：
-    # pywebview 自动选择引擎时，偶尔会悄悄退回老旧的 MSHTML(IE) 内核——那个内核 JS 桥接常失效、
-    # 本界面的毛玻璃/新式 JS 也渲染不出来，就会时不时“接口未就绪”，重打包也只是碰运气。
-    # 显式指定 edgechromium 可消除这种随机性；若该调用本身不被支持才退回默认。
-    try:
-        webview.start(gui="edgechromium")
-    except Exception:
-        webview.start()
+    webview.start()
 
 
 if __name__ == "__main__":
