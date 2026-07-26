@@ -1,0 +1,5 @@
+requests
+ddddocr
+yagmail
+# 服务器（无显示环境）请用 headless 版 opencv，避免 libGL.so.1 缺失：
+opencv-python-headless

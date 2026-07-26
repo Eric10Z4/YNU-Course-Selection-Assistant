@@ -1,0 +1,16 @@
+[Unit]
+Description=YNU 抢课助手 (headless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 改成你实际的目录和用户
+WorkingDirectory=/root/qiangke
+User=root
+ExecStart=/root/qiangke/venv/bin/python /root/qiangke/qiangke_cli.py run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,27 @@
+{
+  "username": "你的学号",
+  "password": "你的密码",
+  "batch": "用 batches 子命令查到的开放批次code；留空则用内置默认",
+  "campus": "02",
+
+  "mode": "fast",
+  "custom_salvo": "1",
+  "custom_interval": "0.5",
+
+  "start_at": "",
+
+  "peak": {
+    "enabled": false,
+    "startMin": "43",
+    "endMin": "45",
+    "mult": "4"
+  },
+
+  "email_user": "",
+  "email_auth": "",
+
+  "courses": [
+    {"name": "示例课程A", "id": "用 query 子命令查到的教学班ID", "type": "XGXK"},
+    {"name": "示例课程B", "id": "另一个教学班ID", "type": "TJKC"}
+  ]
+}
