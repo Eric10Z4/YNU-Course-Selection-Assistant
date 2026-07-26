@@ -17,6 +17,7 @@ import queue
 import secrets
 import threading
 import webbrowser
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from contextlib import redirect_stdout
@@ -77,18 +78,47 @@ BG_CANDIDATES = ("background.png", "background.jpg", "background.jpeg", "bg.png"
 # ---- 本地服务器 / 消息广播（取代不稳定的 pywebview js_api 桥接）----
 TOKEN = ""                       # 启动时随机生成，前端与服务器共享，防止本机其它程序访问
 _subs = []                       # 每个 SSE 连接一个队列
-_subs_lock = threading.Lock()
+_backlog = deque(maxlen=2000)    # 最近消息的环形缓冲，用于断线重连后补发
+_eid = 0                         # 单调递增的消息 ID
+_lock = threading.Lock()         # 同时保护 _subs / _backlog / _eid
 
 
 def _emit(msg):
-    """把一条消息广播给所有已连接的 SSE 客户端。"""
+    """给每条消息编号、存入环形缓冲，并广播给所有已连接的 SSE 客户端。
+
+    结果/状态类推送若恰好在 SSE 短暂重连时发出，浏览器重连会带上 Last-Event-ID，
+    服务器据此补发这段时间漏掉的消息，避免界面“查了没反应”。
+    """
+    global _eid
     data = json.dumps(msg, ensure_ascii=False)
-    with _subs_lock:
+    with _lock:
+        _eid += 1
+        item = (_eid, data)
+        _backlog.append(item)
         for q in list(_subs):
             try:
-                q.put_nowait(data)
+                q.put_nowait(item)
             except Exception:
                 pass
+
+
+def keep_awake(on):
+    """挂机期间阻止 Windows 进入睡眠/休眠（否则定时/高峰抢课会被系统睡眠打断）。
+    只在抢课/等待开始期间开启，停止后恢复，空闲时电脑照常正常休眠。
+    注意：这挡不住“合上笔记本盖子”触发的睡眠——长期挂机建议插电、且把合盖动作设为“不采取操作”。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ES_CONTINUOUS = 0x80000000
+        ES_SYSTEM_REQUIRED = 0x00000001
+        if on:
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+        else:
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+    except Exception:
+        pass
 
 
 def resource_path(name):
@@ -493,6 +523,7 @@ class GrabEngine:
     def run(self, cfg):
         self.stop_flag.clear()
         self.total_count = 0
+        keep_awake(True)          # 挂机期间阻止系统睡眠，停止时在 finally 里恢复
         try:
             self.ensure_session()
             if cfg["mode"] == "custom":
@@ -534,45 +565,55 @@ class GrabEngine:
                 self.event("status", [c["name"], "抢课中…"])
             pool = ThreadPoolExecutor(max_workers=max(4, len(courses) * max_salvo + 2))
             was_peak = False
+            err_streak = 0
             try:
                 while not self.stop_flag.is_set():
-                    active = [c for c in courses if not done[id(c)].is_set()]
-                    if not active:
-                        self.log("所有课程均已抢到，结束。")
-                        break
-                    # 计算本轮强度：高峰内优先缩短间隔，间隔已为0则提升并发
-                    in_peak = self._peak_active(peak)
-                    if in_peak and not was_peak:
-                        self.log(f"进入高峰时段，强度×{mult:g}")
-                    elif was_peak and not in_peak:
-                        self.log("离开高峰时段，恢复正常强度")
-                    was_peak = in_peak
-                    if in_peak:
-                        if base_interval > 0:
-                            cur_salvo, cur_interval = base_salvo, base_interval / mult
+                    # 单轮整体兜底：长期挂机时任何偶发异常都不能让抢课循环退出
+                    try:
+                        active = [c for c in courses if not done[id(c)].is_set()]
+                        if not active:
+                            self.log("所有课程均已抢到，结束。")
+                            break
+                        # 计算本轮强度：高峰内优先缩短间隔，间隔已为0则提升并发
+                        in_peak = self._peak_active(peak)
+                        if in_peak and not was_peak:
+                            self.log(f"进入高峰时段，强度×{mult:g}")
+                        elif was_peak and not in_peak:
+                            self.log("离开高峰时段，恢复正常强度")
+                        was_peak = in_peak
+                        if in_peak:
+                            if base_interval > 0:
+                                cur_salvo, cur_interval = base_salvo, base_interval / mult
+                            else:
+                                cur_salvo, cur_interval = max(1, int(round(base_salvo * mult))), 0.0
                         else:
-                            cur_salvo, cur_interval = max(1, int(round(base_salvo * mult))), 0.0
-                    else:
-                        cur_salvo, cur_interval = base_salvo, base_interval
+                            cur_salvo, cur_interval = base_salvo, base_interval
 
-                    futures = []
-                    for c in active:
-                        for _ in range(cur_salvo):
-                            futures.append(pool.submit(self.fire_once, c, cfg, done[id(c)]))
-                    for f in futures:
-                        try:
-                            f.result(timeout=TIMEOUT + 5)
-                        except Exception:
-                            pass
-                    if self.stop_flag.is_set():
-                        break
-                    if cur_interval:
-                        time.sleep(cur_interval)
+                        futures = []
+                        for c in active:
+                            for _ in range(cur_salvo):
+                                futures.append(pool.submit(self.fire_once, c, cfg, done[id(c)]))
+                        for f in futures:
+                            try:
+                                f.result(timeout=TIMEOUT + 5)
+                            except Exception:
+                                pass
+                        err_streak = 0
+                        if self.stop_flag.is_set():
+                            break
+                        if cur_interval:
+                            time.sleep(cur_interval)
+                    except Exception as e:
+                        # 不退出循环：记一笔、退避一下再继续（连续出错时退避加长，避免刷屏/空转）
+                        err_streak += 1
+                        self.log(f"本轮异常（第 {err_streak} 次，已自动继续）：{e}")
+                        time.sleep(min(5.0, 0.5 * err_streak))
             finally:
                 pool.shutdown(wait=False)
         except Exception as e:
             self.log(f"运行异常：{e}")
         finally:
+            keep_awake(False)     # 恢复系统正常睡眠策略
             self.event("finished", None)
 
     def stop(self):
@@ -849,27 +890,37 @@ class _Handler(BaseHTTPRequestHandler):
         if parse_qs(u.query).get("t", [""])[0] != TOKEN:
             self._send(403); return
         if u.path == "/events":
+            # 重连时浏览器自动带上 Last-Event-ID；据此补发断线期间漏掉的消息
+            try:
+                last = int(self.headers.get("Last-Event-ID") or 0)
+            except Exception:
+                last = 0
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
             self.end_headers()
-            q = queue.Queue(maxsize=2000)
-            with _subs_lock:
+            q = queue.Queue(maxsize=4000)
+            # 在同一把锁内“快照待补发消息 + 登记订阅”，保证不漏发也不重发
+            with _lock:
+                replay = [it for it in _backlog if it[0] > last] if last else []
                 _subs.append(q)
             try:
-                self.wfile.write(b": connected\n\n"); self.wfile.flush()
+                self.wfile.write(b": connected\n\n")
+                for eid, data in replay:
+                    self.wfile.write(("id: %d\ndata: %s\n\n" % (eid, data)).encode("utf-8"))
+                self.wfile.flush()
                 while True:
                     try:
-                        data = q.get(timeout=15)
-                        self.wfile.write(("data: " + data + "\n\n").encode("utf-8"))
+                        eid, data = q.get(timeout=15)
+                        self.wfile.write(("id: %d\ndata: %s\n\n" % (eid, data)).encode("utf-8"))
                     except queue.Empty:
                         self.wfile.write(b": ping\n\n")   # 心跳，探测断线
                     self.wfile.flush()
             except Exception:
                 pass
             finally:
-                with _subs_lock:
+                with _lock:
                     if q in _subs:
                         _subs.remove(q)
             return
@@ -1469,7 +1520,13 @@ document.getElementById("selModal").addEventListener("mousedown",e=>{ if(e.targe
 document.getElementById("confModal").addEventListener("mousedown",e=>{ if(e.target.id==="confModal")closeConflict(); });
 
 // 被 Python 调用
-window.appLog=function(t){let b=$("#logbox");b.textContent+=t+"\n";b.scrollTop=b.scrollHeight;};
+let _logLines=0;
+window.appLog=function(t){
+  let b=$("#logbox"); b.textContent+=t+"\n"; _logLines++;
+  // 长期挂机防止日志无限增长撑爆内存/拖慢渲染：超过 1200 行就只保留最近 700 行（每约 500 条才裁一次）
+  if(_logLines>1200){ let ls=b.textContent.split("\n"); b.textContent=ls.slice(ls.length-700).join("\n"); _logLines=700; }
+  b.scrollTop=b.scrollHeight;
+};
 window.appEvent=function(kind,payload){
   if(kind==="count"){$("#cnt").textContent="请求数 "+payload;}
   else if(kind==="status"){let[name,st]=payload;
