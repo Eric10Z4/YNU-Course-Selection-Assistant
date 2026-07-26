@@ -326,6 +326,63 @@ class GrabEngine:
             pass
         return {"classes": classes, "noArranged": no_arr}, None
 
+    def query_selected(self, cfg):
+        """查询已选课程（courseResult.do）。返回 (list, err)。"""
+        if not self.ensure_login(cfg["username"], cfg["password"]):
+            return None, "登录失败"
+        ts = int(time.time() * 1000)
+        url = (f"https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/elective/courseResult.do"
+               f"?timestamp={ts}&studentCode={cfg['username']}&electiveBatchCode={cfg['batch']}")
+        try:
+            r = self.session.get(url, headers=self._std_headers(), cookies=self._cookies(), timeout=QTIMEOUT)
+            if r.status_code == 401:
+                self.invalidate_auth()
+                if not self.ensure_login(cfg["username"], cfg["password"]):
+                    return None, "登录态失效"
+                r = self.session.get(url, headers=self._std_headers(), cookies=self._cookies(), timeout=QTIMEOUT)
+            data = r.json()
+        except Exception as e:
+            return None, f"请求异常：{e}"
+        if str(data.get("code")) != "1":
+            return None, data.get("msg", "查询已选失败")
+        out = []
+        for it in data.get("dataList") or []:
+            out.append({
+                "teachingClassID": it.get("teachingClassID"),
+                "courseName": it.get("courseName") or "",
+                "teacherName": it.get("teacherName") or "",
+                "place": it.get("teachingPlace") or "",
+                "credit": it.get("credit") or "",
+                "typeName": it.get("courseTypeName") or "",
+                "campus": it.get("campusName") or "",
+                "isConflict": str(it.get("isConflict")),
+                "conflictDesc": it.get("conflictDesc") or "",
+                "canDelete": str(it.get("canDelete")),
+            })
+        return out, None
+
+    def withdraw_course(self, cfg, teaching_class_id):
+        """退选（deleteVolunteer.do）。返回 (ok, msg)。"""
+        if not self.ensure_login(cfg["username"], cfg["password"]):
+            return False, "登录失败"
+        param = {"data": {"operationType": "2", "studentCode": cfg["username"],
+                          "electiveBatchCode": cfg["batch"], "teachingClassId": teaching_class_id,
+                          "isMajor": "1"}}
+        ts = int(time.time() * 1000)
+        url = (f"https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/elective/deleteVolunteer.do"
+               f"?timestamp={ts}&deleteParam={requests.utils.quote(json.dumps(param))}")
+        try:
+            r = self.session.get(url, headers=self._std_headers(), cookies=self._cookies(), timeout=QTIMEOUT)
+            if r.status_code == 401:
+                self.invalidate_auth()
+                if not self.ensure_login(cfg["username"], cfg["password"]):
+                    return False, "登录态失效"
+                r = self.session.get(url, headers=self._std_headers(), cookies=self._cookies(), timeout=QTIMEOUT)
+            data = r.json()
+        except Exception as e:
+            return False, f"请求异常：{e}"
+        return (str(data.get("code")) == "1"), data.get("msg", "")
+
     def send_success(self, name, email_user, email_auth):
         if not email_user or not email_auth or yagmail is None:
             return
@@ -561,8 +618,45 @@ class Api:
                 self._log(f"查询失败：{err}")
                 self._push("onQueryResult", {"error": err})
             else:
-                self._log(f"查询到 {len(results)} 个教学班")
-                self._push("onQueryResult", {"results": results})
+                # 顺带取一次已选，用于在结果里标记「已选」
+                sel, serr = self.engine.query_selected(cfg)
+                ids = [s["teachingClassID"] for s in sel] if (not serr and sel) else []
+                self._log(f"查询到 {len(results)} 个教学班（已选 {len(ids)} 门）")
+                self._push("onQueryResult", {"results": results, "selectedIds": ids})
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True}
+
+    def get_selected(self, cfg):
+        if requests is None or ddddocr is None:
+            self._push("onSelected", {"error": "缺少依赖：pip install requests ddddocr"})
+            return {"ok": True}
+        if not cfg.get("username") or not cfg.get("password") or not cfg.get("batch"):
+            self._push("onSelected", {"error": "请先填学号密码并选择批次"})
+            return {"ok": True}
+
+        def worker():
+            self._log("正在获取已选课程…")
+            sel, err = self.engine.query_selected(cfg)
+            if err:
+                self._log(f"获取已选失败：{err}")
+                self._push("onSelected", {"error": err})
+            else:
+                self._log(f"已选课程 {len(sel)} 门")
+                self._push("onSelected", {"selected": sel})
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True}
+
+    def withdraw(self, cfg, tcid):
+        if requests is None or ddddocr is None:
+            return {"ok": False, "msg": "缺少依赖"}
+
+        def worker():
+            ok, msg = self.engine.withdraw_course(cfg, tcid)
+            self._log(("退选成功：" if ok else "退选失败：") + (msg or ""))
+            # 退选后刷新已选列表
+            sel, err = self.engine.query_selected(cfg)
+            if not err and sel is not None:
+                self._push("onSelected", {"selected": sel})
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True}
 
@@ -774,9 +868,10 @@ thead th{position:sticky;top:0;background:rgba(20,20,30,.92);backdrop-filter:blu
 tbody td{padding:8px 10px;border-top:1px solid rgba(255,255,255,.06)}
 tbody tr:hover{background:rgba(255,255,255,.04)}
 .ok{color:var(--green)}
-.full{color:var(--sub)}
-.tag{font-size:11px;padding:1px 7px;border-radius:6px;background:rgba(255,255,255,.08)}
+.full{color:var(--red)}
+.tag{font-size:11px;padding:1px 7px;border-radius:6px;background:rgba(255,255,255,.08);white-space:nowrap}
 .tag.clk{cursor:help;background:rgba(251,113,133,.18);color:#fecdd3}
+.tag.sel{background:rgba(52,211,153,.22);color:#a7f3d0}
 .act{display:flex;align-items:center;gap:10px;margin-top:10px}
 .act .tip{color:var(--sub);font-size:12px}
 .del{color:var(--red);cursor:pointer;font-weight:700}
@@ -805,7 +900,7 @@ tbody tr:hover{background:rgba(255,255,255,.04)}
 .modal.on{display:flex}
 .modal-bg{position:absolute;inset:0;z-index:-1;__BG2_RULE__}
 .modal-card{width:min(1040px,96vw);max-height:92vh;overflow:auto;position:relative;
-  background:var(--noise),rgba(20,20,30,.28);backdrop-filter:blur(18px) saturate(1.6);-webkit-backdrop-filter:blur(18px);
+  background:var(--noise),rgba(20,20,30,.30);backdrop-filter:blur(0px) saturate(1.6);-webkit-backdrop-filter:blur(0px);
   border:1px solid var(--border);border-radius:18px;padding:18px 20px;box-shadow:0 24px 70px rgba(0,0,0,.5)}
 .modal-close{position:absolute;top:12px;right:16px;cursor:pointer;color:var(--sub);font-size:22px;background:none;border:none;line-height:1}
 .modal-close:hover{color:var(--text)}
@@ -827,7 +922,8 @@ tbody tr:hover{background:rgba(255,255,255,.04)}
 <div id="bg"></div>
 <div class="app">
   <div class="head"><h1>YNU 抢课助手</h1>
-    <button class="ghost" style="margin-left:auto;flex:none;padding:7px 16px" onclick="openTimetable()">我的课表</button>
+    <button class="ghost" style="margin-left:auto;flex:none;padding:7px 16px" onclick="openSelected()">已选课程</button>
+    <button class="ghost" style="flex:none;padding:7px 16px;margin-left:8px" onclick="openTimetable()">我的课表</button>
     <div class="status" id="status" style="margin-left:16px">空闲</div></div>
   <div class="body">
     <div class="left">
@@ -883,6 +979,7 @@ tbody tr:hover{background:rgba(255,255,255,.04)}
             <input id="qkw" placeholder="搜索课名…">
             <button class="btn" onclick="doQuery()">查询</button>
             <label class="chk"><input type="checkbox" id="qonly" style="width:auto" onchange="renderResults()">仅显示有余量</label>
+            <label class="chk"><input type="checkbox" id="qshowsel" checked style="width:auto" onchange="renderResults()">显示已选课程</label>
             <span class="tip" id="qstatus" style="color:var(--sub);font-size:12px"></span>
           </div>
           <div class="tablewrap">
@@ -932,6 +1029,30 @@ tbody tr:hover{background:rgba(255,255,255,.04)}
     <div class="noarr" id="ttNoArr"></div>
   </div>
 </div>
+<div class="modal" id="selModal">
+  <div class="modal-bg"></div>
+  <div class="modal-card">
+    <button class="modal-close" onclick="closeSelected()">✕</button>
+    <div class="sec"><div class="bar"></div><b>已选课程</b>
+      <span class="tip" id="selStatus" style="margin-left:12px"></span>
+      <button class="ghost" style="margin-left:auto;flex:none;padding:6px 14px" onclick="loadSelected()">刷新</button></div>
+    <div class="tablewrap" style="max-height:70vh;margin-top:8px">
+      <table><thead><tr><th>课程</th><th style="width:90px">教师</th><th>时间地点</th><th style="width:56px">学分</th><th style="width:80px">分类</th><th style="width:72px">操作</th></tr></thead>
+      <tbody id="selBody"></tbody></table>
+    </div>
+  </div>
+</div>
+<div class="modal" id="confModal">
+  <div class="modal-bg"></div>
+  <div class="modal-card" style="width:min(560px,94vw)">
+    <button class="modal-close" onclick="closeConflict()">✕</button>
+    <div class="sec"><div class="bar"></div><b>冲突详情</b></div>
+    <div id="confBody" style="margin-top:10px;font-size:13.5px;line-height:1.7;color:var(--text);white-space:pre-wrap;word-break:break-word"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px">
+      <button class="ghost" style="flex:none;padding:7px 20px" onclick="closeConflict()">确定</button>
+    </div>
+  </div>
+</div>
 <script>
 const CATS=["通识选修课 (XGXK)","推荐课程 (TJKC)","主修课程 (FANKC)","体育课程 (TYKC)","创新创业 (CXKC)"];
 const MODE_DESC={
@@ -979,20 +1100,22 @@ function gatherCfg(){
     peak:peak,courses:courses};
 }
 
-// 统一的 API 调用：等待桥接就绪（pywebview 在打包 exe 里挂载方法有延迟）
-let _pwReady=false;
+// 统一的 API 调用：等待桥接就绪（打包 exe 冷启动时 pywebview 挂载较慢，这里耐心等待而不是提前报错）
+let _pwReady=false, _initHinted=false;
 window.addEventListener("pywebviewready",()=>{_pwReady=true;});
 function fnReady(name){
   return window.pywebview && window.pywebview.api && typeof window.pywebview.api[name]==="function";
 }
 async function callApi(name,...args){
+  // 冷启动时桥接/方法可能还没挂上：耐心等待最多 ~40 秒，期间点击不会丢，就绪后自动执行
   if(!fnReady(name)){
-    // 轮询等待该方法真正挂载（最多 ~8 秒）
-    for(let i=0;i<80 && !fnReady(name);i++){ await new Promise(r=>setTimeout(r,100)); }
+    if(!_initHinted){ _initHinted=true; appLog("界面初始化中，请稍候…（首次启动会慢一些）"); }
+    let deadline=Date.now()+40000;
+    while(!fnReady(name) && Date.now()<deadline){ await new Promise(r=>setTimeout(r,60)); }
   }
   if(!fnReady(name)){
-    appLog("接口未就绪("+name+")，请等 1~2 秒后重试");
-    alert("接口还在初始化，请等待 1~2 秒后再点一次");
+    appLog("接口未就绪("+name+")：界面组件未能正常启动");
+    alert("界面初始化超时。\n多为系统缺少 Microsoft Edge WebView2 运行时，安装后重开即可；\n或稍等几秒再点一次。");
     return null;
   }
   try{ return await window.pywebview.api[name](...args); }
@@ -1074,37 +1197,83 @@ async function doQuery(){
   $("#qstatus").textContent="查询中…";
   await callApi("query",cfg, $("#qcat").value, $("#qkw").value.trim());  // 结果通过 onQueryResult
 }
+let selectedIds=[];
 window.onQueryResult=function(r){
   if(!r){$("#qstatus").textContent="";return;}
   if(r.error){$("#qstatus").textContent="查询失败："+r.error;return;}
-  allResults=r.results||[]; renderResults();
+  allResults=r.results||[]; selectedIds=r.selectedIds||[]; renderResults();
 };
 function renderResults(){
-  let only=$("#qonly").checked, tb=$("#qbody"); tb.innerHTML=""; let shown=0;
+  let only=$("#qonly").checked, showSel=$("#qshowsel").checked, tb=$("#qbody"); tb.innerHTML=""; let shown=0;
+  let selSet=new Set(selectedIds);
   allResults.forEach((r,idx)=>{
     let full=r.isFull==="1"; if(only&&full)return;
+    let mine=selSet.has(r.teachingClassID);
+    if(mine&&!showSel)return;                 // 关掉“显示已选”时隐藏已选课程
     let conf=r.isConflict==="1";
-    let flags=[]; if(full)flags.push("满"); if(conf)flags.push("冲突");
-    let flag=flags.length?flags.join("/"):"可选";
+    let flags=[]; if(mine)flags.push('<span class="tag sel">已选</span>');
+    let fs=[]; if(full)fs.push("满"); if(conf)fs.push("冲突");
+    let flag=fs.length?fs.join("/"):"可选";
     let hasDesc=conf&&r.conflictDesc;
     let tag = hasDesc
       ? `<span class="tag clk" data-ci="${idx}" title="${esc(r.conflictDesc)}">${flag} ⓘ</span>`
       : `<span class="tag">${flag}</span>`;
     let tr=document.createElement("tr");
+    if(mine)tr.style.background="rgba(52,211,153,.08)";
+    else if(conf)tr.style.background="rgba(248,113,113,.10)";   // 冲突：淡红整行（已选优先显绿）
     tr.innerHTML=`<td><input type="checkbox" data-i="${idx}" style="width:auto"></td>
       <td class="${full?'full':'ok'}">${esc(r.courseName)}</td><td>${esc(r.teacherName)}</td>
       <td>${esc(r.place)}</td><td>${r.remain==null?'-':r.remain}</td>
-      <td>${tag}</td><td>${esc(r.cat)}</td>`;
+      <td>${flags.join(" ")}${tag}</td><td>${esc(r.cat)}</td>`;
     tb.appendChild(tr); shown++;
   });
-  $("#qstatus").textContent=`共 ${allResults.length} 个教学班，显示 ${shown}`;
+  let selCount=allResults.filter(r=>selSet.has(r.teachingClassID)).length;
+  $("#qstatus").textContent=`共 ${allResults.length} 个教学班，显示 ${shown}${selCount?("，已选 "+selCount):""}`;
+}
+
+// 已选课程 弹窗
+function openSelected(){ $("#selModal").classList.add("on"); loadSelected(); }
+function closeSelected(){ $("#selModal").classList.remove("on"); }
+async function loadSelected(){
+  let cfg=gatherCfg();
+  if(!cfg.username||!cfg.password){$("#selStatus").textContent="请先填学号密码";return;}
+  if(!cfg.batch){$("#selStatus").textContent="请先选择批次";return;}
+  $("#selStatus").textContent="加载中…";
+  await callApi("get_selected",cfg);   // 结果通过 window.onSelected
+}
+window.onSelected=function(r){
+  if(!r)return;
+  if(r.error){$("#selStatus").textContent="失败："+r.error;$("#selBody").innerHTML="";return;}
+  let list=r.selected||[];
+  selectedIds=list.map(x=>x.teachingClassID);   // 同步给查询列表的标记
+  if(allResults.length)renderResults();
+  let credit=list.reduce((s,x)=>s+(parseFloat(x.credit)||0),0);
+  $("#selStatus").textContent=`共 ${list.length} 门，${credit} 学分`;
+  let tb=$("#selBody"); tb.innerHTML="";
+  list.forEach((x,i)=>{
+    let canDel=x.canDelete==="1";
+    let conf=x.isConflict==="1"?`<span class="tag clk" title="${esc(x.conflictDesc||'')}">冲突 ⓘ</span>`:"";
+    let btn=canDel?`<button class="btn" style="padding:5px 12px" data-wid="${i}">退选</button>`:`<span class="tip">不可退</span>`;
+    let tr=document.createElement("tr");
+    tr.innerHTML=`<td>${esc(x.courseName)} ${conf}</td><td>${esc(x.teacherName)}</td>
+      <td>${esc(x.place||"—")}</td><td>${esc(x.credit)}</td><td>${esc(x.typeName)}</td><td>${btn}</td>`;
+    let b=tr.querySelector("[data-wid]"); if(b)b.onclick=()=>withdrawCourse(x);
+    tb.appendChild(tr);
+  });
+};
+async function withdrawCourse(x){
+  if(!confirm(`确定退选：${x.courseName}？`))return;
+  $("#selStatus").textContent="退选中…";
+  await callApi("withdraw",gatherCfg(),x.teachingClassID);  // 完成后 onSelected 自动刷新
 }
 // 点“冲突ⓘ”查看和哪门课冲突
 document.getElementById("qbody").addEventListener("click",e=>{
   let t=e.target.closest(".tag.clk"); if(!t)return;
   let r=allResults[+t.dataset.ci]; if(!r||!r.conflictDesc)return;
-  alert("冲突详情：\n"+r.conflictDesc);
+  openConflict(r.conflictDesc);
 });
+function openConflict(desc){ $("#confBody").textContent=desc; $("#confModal").classList.add("on"); }
+function closeConflict(){ $("#confModal").classList.remove("on"); }
 function addSelected(){
   let picks=[...$("#qbody").querySelectorAll("input:checked")].map(c=>allResults[+c.dataset.i]);
   if(!picks.length){alert("请先勾选要抢的课");return;}
@@ -1170,12 +1339,16 @@ function toggleLogBig(){
 }
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){
-    if($("#ttModal").classList.contains("on"))closeTimetable();
+    if($("#confModal").classList.contains("on"))closeConflict();
+    else if($("#selModal").classList.contains("on"))closeSelected();
+    else if($("#ttModal").classList.contains("on"))closeTimetable();
     else if($("#logCard").classList.contains("big"))toggleLogBig();
   }
 });
-// 点弹窗空白处（背景蒙层）关闭课表
+// 点弹窗空白处（背景蒙层）关闭
 document.getElementById("ttModal").addEventListener("mousedown",e=>{ if(e.target.id==="ttModal")closeTimetable(); });
+document.getElementById("selModal").addEventListener("mousedown",e=>{ if(e.target.id==="selModal")closeSelected(); });
+document.getElementById("confModal").addEventListener("mousedown",e=>{ if(e.target.id==="confModal")closeConflict(); });
 
 // 被 Python 调用
 window.appLog=function(t){let b=$("#logbox");b.textContent+=t+"\n";b.scrollTop=b.scrollHeight;};
@@ -1223,7 +1396,14 @@ def main():
                                 min_size=(1060, 720), background_color="#0d0d13")
     api.window = win
     _dark_titlebar_later(title)
-    webview.start()
+    # 强制使用现代 EdgeChromium(WebView2) 引擎：
+    # pywebview 自动选择引擎时，偶尔会悄悄退回老旧的 MSHTML(IE) 内核——那个内核 JS 桥接常失效、
+    # 本界面的毛玻璃/新式 JS 也渲染不出来，就会时不时“接口未就绪”，重打包也只是碰运气。
+    # 显式指定 edgechromium 可消除这种随机性；若该调用本身不被支持才退回默认。
+    try:
+        webview.start(gui="edgechromium")
+    except Exception:
+        webview.start()
 
 
 if __name__ == "__main__":
