@@ -5,7 +5,7 @@ YNU 抢课助手 · PyWebView 版（毛玻璃界面）
 · 界面用 HTML/CSS/JS（真·毛玻璃 backdrop-filter + 背景图 + 高清渲染）
 · 后端复用抢课引擎：登录/验证码OCR/齐射并发/查课/自动重登
 · 分级模式 turbo/fast/steady/custom；下拉定时；配置保存加载；实时日志
-依赖： pip install pywebview requests ddddocr yagmail pillow
+依赖： pip install pywebview requests onnxruntime yagmail pillow
 背景图：把图片命名为 background.png（或 .jpg）放到 exe 同目录即可；不放则用暗色渐变。
 """
 
@@ -20,7 +20,6 @@ import webbrowser
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from contextlib import redirect_stdout
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote, urlencode
 
@@ -33,9 +32,63 @@ try:
 except Exception:
     requests = None
 try:
-    import ddddocr
-except Exception:
-    ddddocr = None
+    import numpy as np
+    from PIL import Image as _PILImage
+    import io as _io
+    import onnxruntime as _ort
+
+    # ---- 内嵌轻量 OCR（替代 ddddocr）----
+    class _LiteOCR:
+        _charset = None
+        _session = None
+
+        @staticmethod
+        def _res(name):
+            if getattr(sys, 'frozen', False):
+                return os.path.join(sys._MEIPASS, name)
+            return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+
+        @classmethod
+        def _load(cls):
+            if cls._session is not None:
+                return
+            with open(cls._res("ocr_charset.json"), "r", encoding="utf-8") as f:
+                cls._charset = json.load(f)
+            cls._session = _ort.InferenceSession(
+                cls._res("ocr_model.onnx"),
+                providers=["CPUExecutionProvider"])
+
+        @classmethod
+        def classification(cls, img_bytes):
+            cls._load()
+            im = _PILImage.open(_io.BytesIO(img_bytes))
+            if im.mode == "RGBA":
+                bg = _PILImage.new("RGB", im.size, (255, 255, 255))
+                bg.paste(im, mask=im.split()[3])
+                im = bg
+            w, h = im.size
+            new_w = int(w * (64 / h))
+            im = im.resize((new_w, 64), _PILImage.BILINEAR)
+            im = im.convert("L")
+            arr = np.array(im).astype(np.float32) / 255.0
+            arr = arr[np.newaxis, np.newaxis, :, :]
+            output = cls._session.run(None, {"input1": arr})[0]
+            pred = np.argmax(output[:, 0, :], axis=1)
+            result = []
+            prev = -1
+            for idx in pred:
+                idx = int(idx)
+                if idx != 0 and idx != prev and idx < len(cls._charset):
+                    result.append(cls._charset[idx])
+                prev = idx
+            return "".join(result)
+
+    lite_ocr = _LiteOCR()
+except Exception as _ocr_err:
+    lite_ocr = None
+    _ocr_init_error = str(_ocr_err)
+else:
+    _ocr_init_error = ""
 try:
     import yagmail
 except Exception:
@@ -171,11 +224,7 @@ class GrabEngine:
         return self.session
 
     def get_ocr(self):
-        if self.ocr is None:
-            with open(os.devnull, "w") as fnull:
-                with redirect_stdout(fnull):
-                    self.ocr = ddddocr.DdddOcr()
-        return self.ocr
+        return lite_ocr
 
     def login(self, username, password):
         try:
@@ -647,8 +696,8 @@ class Api:
 
     # ---- 前端可调用 ----
     def start(self, cfg):
-        if requests is None or ddddocr is None:
-            return {"ok": False, "msg": "缺少依赖：pip install requests ddddocr"}
+        if requests is None or lite_ocr is None:
+            return {"ok": False, "msg": f"缺少依赖：{_ocr_init_error or 'pip install requests onnxruntime'}"}
         if not cfg.get("username") or not cfg.get("password"):
             return {"ok": False, "msg": "请填写学号和密码"}
         if not cfg.get("courses"):
@@ -664,8 +713,8 @@ class Api:
 
     def query(self, cfg, cat_index, keyword):
         """后台线程执行，结果通过 onQueryResult 回调推给前端，日志实时可见。"""
-        if requests is None or ddddocr is None:
-            self._push("onQueryResult", {"error": "缺少依赖：pip install requests ddddocr"})
+        if requests is None or lite_ocr is None:
+            self._push("onQueryResult", {"error": f"缺少依赖：{_ocr_init_error or 'requests/onnxruntime 未安装'}"})
             return {"ok": True}
         try:
             cat_index = int(cat_index)
@@ -691,8 +740,8 @@ class Api:
         return {"ok": True}
 
     def get_selected(self, cfg):
-        if requests is None or ddddocr is None:
-            self._push("onSelected", {"error": "缺少依赖：pip install requests ddddocr"})
+        if requests is None or lite_ocr is None:
+            self._push("onSelected", {"error": f"缺少依赖：{_ocr_init_error or 'requests/onnxruntime 未安装'}"})
             return {"ok": True}
         if not cfg.get("username") or not cfg.get("password") or not cfg.get("batch"):
             self._push("onSelected", {"error": "请先填学号密码并选择批次"})
@@ -711,7 +760,7 @@ class Api:
         return {"ok": True}
 
     def withdraw(self, cfg, tcid):
-        if requests is None or ddddocr is None:
+        if requests is None or lite_ocr is None:
             return {"ok": False, "msg": "缺少依赖"}
 
         def worker():
@@ -726,8 +775,8 @@ class Api:
 
     def get_batches(self, cfg):
         """后台线程执行，结果通过 onBatches 回调推给前端。"""
-        if requests is None or ddddocr is None:
-            self._push("onBatches", {"error": "缺少依赖：pip install requests ddddocr"})
+        if requests is None or lite_ocr is None:
+            self._push("onBatches", {"error": f"缺少依赖：{_ocr_init_error or 'requests/onnxruntime 未安装'}"})
             return {"ok": True}
         if not cfg.get("username") or not cfg.get("password"):
             self._push("onBatches", {"error": "请先填写学号和密码"})
@@ -746,8 +795,8 @@ class Api:
         return {"ok": True}
 
     def get_timetable(self, cfg):
-        if requests is None or ddddocr is None:
-            self._push("onTimetable", {"error": "缺少依赖：pip install requests ddddocr"})
+        if requests is None or lite_ocr is None:
+            self._push("onTimetable", {"error": f"缺少依赖：{_ocr_init_error or 'requests/onnxruntime 未安装'}"})
             return {"ok": True}
         if not cfg.get("username") or not cfg.get("password"):
             self._push("onTimetable", {"error": "请先填写学号和密码"})
