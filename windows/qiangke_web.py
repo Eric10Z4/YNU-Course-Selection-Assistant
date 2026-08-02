@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from contextlib import redirect_stdout
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote, urlencode
 
 try:
     import webview
@@ -183,16 +183,17 @@ class GrabEngine:
             url = f"https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/student/4/vcode.do?timestamp={ts}"
             r = self.session.get(url, headers={
                 "Accept": "application/json, text/javascript, */*; q=0.01",
-                "Referer": "http://xk.ynu.edu.cn/", "X-Requested-With": "XMLHttpRequest"}, timeout=TIMEOUT)
+                "Referer": "https://xk.ynu.edu.cn/", "X-Requested-With": "XMLHttpRequest"}, timeout=TIMEOUT)
             vtoken = r.json()["data"]["token"]
-            url = f"https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/student/vcode/image.do?vtoken={vtoken}"
+            url = "https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/student/vcode/image.do?" + urlencode({"vtoken": vtoken})
             r = self.session.get(url, headers={
                 "Accept": "application/json, text/javascript, */*; q=0.01",
                 "Referer": "https://xk.ynu.edu.cn/", "X-Requested-With": "XMLHttpRequest"}, timeout=TIMEOUT)
             code = self.get_ocr().classification(r.content)
             ts = int(time.time() * 1000)
-            url = (f"https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/student/check/login.do?"
-                   f"timestrap={ts}&loginName={username}&loginPwd={password}&verifyCode={code}&vtoken={vtoken}")
+            login_qs = urlencode({"timestrap": ts, "loginName": username,
+                                  "loginPwd": password, "verifyCode": code, "vtoken": vtoken})
+            url = f"https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/student/check/login.do?{login_qs}"
             r = self.session.get(url, headers={
                 "Accept": "*/*", "Referer": "https://xk.ynu.edu.cn/", "X-Requested-With": "XMLHttpRequest"}, timeout=TIMEOUT)
             if r.status_code == 200 and str(r.json().get("code")) == "1":
@@ -238,8 +239,8 @@ class GrabEngine:
         tclist = item.get("tcList")
         subs = tclist if tclist else [item]
         for tc in subs:
-            cap = tc.get("classCapacity") or item.get("classCapacity")
-            sel = tc.get("numberOfSelected") or item.get("numberOfSelected")
+            cap = tc.get("classCapacity") if tc.get("classCapacity") is not None else item.get("classCapacity")
+            sel = tc.get("numberOfSelected") if tc.get("numberOfSelected") is not None else item.get("numberOfSelected")
             try:
                 remain = int(cap) - int(sel)
             except (TypeError, ValueError):
@@ -341,7 +342,8 @@ class GrabEngine:
             return None, "登录失败，无法获取课表"
         base = "https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/elective/"
         ts = int(time.time() * 1000)
-        q = f"?timestamp={ts}&studentCode={cfg['username']}&electiveBatchCode={cfg['batch']}"
+        q = "?" + urlencode({"timestamp": ts, "studentCode": cfg['username'],
+                             "electiveBatchCode": cfg['batch']})
         try:
             r = self.session.get(base + "teachingTime.do" + q, headers=self._std_headers(),
                                  cookies=self._cookies(), timeout=QTIMEOUT)
@@ -382,8 +384,9 @@ class GrabEngine:
         if not self.ensure_login(cfg["username"], cfg["password"]):
             return None, "登录失败"
         ts = int(time.time() * 1000)
-        url = (f"https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/elective/courseResult.do"
-               f"?timestamp={ts}&studentCode={cfg['username']}&electiveBatchCode={cfg['batch']}")
+        url = ("https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/elective/courseResult.do?"
+               + urlencode({"timestamp": ts, "studentCode": cfg['username'],
+                            "electiveBatchCode": cfg['batch']}))
         try:
             r = self.session.get(url, headers=self._std_headers(), cookies=self._cookies(), timeout=QTIMEOUT)
             if r.status_code == 401:
@@ -420,8 +423,9 @@ class GrabEngine:
                           "electiveBatchCode": cfg["batch"], "teachingClassId": teaching_class_id,
                           "isMajor": "1"}}
         ts = int(time.time() * 1000)
-        url = (f"https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/elective/deleteVolunteer.do"
-               f"?timestamp={ts}&deleteParam={requests.utils.quote(json.dumps(param))}")
+        url = ("https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/elective/deleteVolunteer.do?"
+               + urlencode({"timestamp": ts,
+                            "deleteParam": json.dumps(param)}))
         try:
             r = self.session.get(url, headers=self._std_headers(), cookies=self._cookies(), timeout=QTIMEOUT)
             if r.status_code == 401:
@@ -530,7 +534,10 @@ class GrabEngine:
                 base_salvo = max(1, int(float(cfg.get("custom_salvo", 1))))
                 base_interval = max(0.0, float(cfg.get("custom_interval", 0.5)))
             else:
-                m = MODES[cfg["mode"]]
+                m = MODES.get(cfg["mode"])
+                if m is None:
+                    self.log(f"未知模式 '{cfg['mode']}'，已降级为 fast")
+                    m = MODES["fast"]
                 base_salvo, base_interval = m["salvo"], m["interval"]
             # 高峰增强参数
             peak = cfg.get("peak") or {}
@@ -663,6 +670,8 @@ class Api:
         try:
             cat_index = int(cat_index)
         except Exception:
+            cat_index = 0
+        if cat_index < 0 or cat_index >= len(QUERY_CATS):
             cat_index = 0
 
         def worker():
@@ -1534,7 +1543,7 @@ window.appEvent=function(kind,payload){
   else if(kind==="finished"){$("#btnStart").disabled=false;$("#btnStop").disabled=true;
     $("#status").textContent="空闲";$("#status").classList.remove("run");}
 };
-function esc(s){return String(s==null?"":s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 initEvents();   // 建立 SSE 事件通道（appLog/appEvent 已定义）
 </script>
 </body></html>
