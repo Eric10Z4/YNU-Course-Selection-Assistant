@@ -32,63 +32,9 @@ try:
 except Exception:
     requests = None
 try:
-    import numpy as np
-    from PIL import Image as _PILImage
-    import io as _io
-    import onnxruntime as _ort
-
-    # ---- 内嵌轻量 OCR（替代 ddddocr）----
-    class _LiteOCR:
-        _charset = None
-        _session = None
-
-        @staticmethod
-        def _res(name):
-            if getattr(sys, 'frozen', False):
-                return os.path.join(sys._MEIPASS, name)
-            return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
-
-        @classmethod
-        def _load(cls):
-            if cls._session is not None:
-                return
-            with open(cls._res("ocr_charset.json"), "r", encoding="utf-8") as f:
-                cls._charset = json.load(f)
-            cls._session = _ort.InferenceSession(
-                cls._res("ocr_model.onnx"),
-                providers=["CPUExecutionProvider"])
-
-        @classmethod
-        def classification(cls, img_bytes):
-            cls._load()
-            im = _PILImage.open(_io.BytesIO(img_bytes))
-            if im.mode == "RGBA":
-                bg = _PILImage.new("RGB", im.size, (255, 255, 255))
-                bg.paste(im, mask=im.split()[3])
-                im = bg
-            w, h = im.size
-            new_w = int(w * (64 / h))
-            im = im.resize((new_w, 64), _PILImage.BILINEAR)
-            im = im.convert("L")
-            arr = np.array(im).astype(np.float32) / 255.0
-            arr = arr[np.newaxis, np.newaxis, :, :]
-            output = cls._session.run(None, {"input1": arr})[0]
-            pred = np.argmax(output[:, 0, :], axis=1)
-            result = []
-            prev = -1
-            for idx in pred:
-                idx = int(idx)
-                if idx != 0 and idx != prev and idx < len(cls._charset):
-                    result.append(cls._charset[idx])
-                prev = idx
-            return "".join(result)
-
-    lite_ocr = _LiteOCR()
-except Exception as _ocr_err:
+    import lite_ocr
+except Exception:
     lite_ocr = None
-    _ocr_init_error = str(_ocr_err)
-else:
-    _ocr_init_error = ""
 try:
     import yagmail
 except Exception:
@@ -116,14 +62,33 @@ MODES = {
     "steady": {"salvo": 1, "interval": 2.0},
 }
 
-# (显示名, 接口文件, teachingClassType)
-QUERY_CATS = [
-    ("通识选修课 (XGXK)", "publicCourse.do",      "XGXK"),
-    ("推荐课程 (TJKC)",   "recommendedCourse.do", "TJKC"),
-    ("主修课程 (FANKC)",  "programCourse.do",     "FANKC"),
-    ("体育课程 (TYKC)",   "programCourse.do",     "TYKC"),
-    ("创新创业 (CXKC)",   "programCourse.do",     "CXKC"),
-]
+# teachingClassType → 接口文件 映射（XGXK/TJKC 有专属接口，其余走 programCourse.do）
+TYPE_ENDPOINT = {
+    "XGXK": "publicCourse.do",
+    "TJKC": "recommendedCourse.do",
+}
+TYPE_ENDPOINT_DEFAULT = "programCourse.do"
+
+# teachingClassType → 中文显示名（静态 fallback，运行时可被 grablessons.do 动态覆盖）
+TYPE_NAMES = {
+    "TJKC": "推荐选课",
+    "FANKC": "方案内选课",
+    "FAWKC": "方案外选课",
+    "XGXK": "公选课",
+    "CXKC": "重修",
+    "TYKC": "体育课",
+    "BYKC": "本研通选课",
+    "FXKC": "辅修课",
+    "QXKC": "全校课程",
+}
+
+def _build_cat(ttype):
+    endpoint = TYPE_ENDPOINT.get(ttype, TYPE_ENDPOINT_DEFAULT)
+    name = TYPE_NAMES.get(ttype, ttype)
+    return (f"{name} ({ttype})", endpoint, ttype)
+
+# (显示名, 接口文件, teachingClassType) — 静态 fallback，运行时会被动态替换
+QUERY_CATS = [_build_cat(t) for t in TYPE_NAMES]
 
 DEFAULT_BATCH = "77c2465143574415b3c76a820384eab1"
 BG_CANDIDATES = ("background.png", "background.jpg", "background.jpeg", "bg.png", "bg.jpg")
@@ -384,6 +349,40 @@ class GrabEngine:
                         "beginTime": bt, "endTime": et, "open": is_open,
                         "typeName": b.get("typeName")})
         return out, None
+
+    def query_course_types(self, cfg):
+        """抓取 grablessons.do 页面，解析当前批次可用的课程类型（teachingClassType）。"""
+        global QUERY_CATS
+        if not self.ensure_login(cfg["username"], cfg["password"]):
+            return None, "登录失败，无法获取课程类型"
+        url = (f"https://xk.ynu.edu.cn/xsxkapp/sys/xsxkapp/*default/grablessons.do"
+               f"?token={self.token}")
+        try:
+            r = self.session.get(url, headers={
+                "Accept": "text/html,*/*",
+                "Referer": "https://xk.ynu.edu.cn/",
+            }, cookies=self._cookies(), timeout=QTIMEOUT)
+        except Exception as e:
+            return None, f"请求异常：{e}"
+        if r.status_code == 401:
+            self.invalidate_auth()
+            return None, "登录态失效"
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code}"
+        html = r.text
+        import re
+        found = re.findall(
+            r'<a[^>]*\bteachingClassType="([A-Z]+)"[^>]*>([^<]+)</a>', html)
+        if not found:
+            return None, "未从页面解析到课程类型（页面结构可能已变化）"
+        types = []
+        for ttype, label in found:
+            label = label.strip()
+            endpoint = TYPE_ENDPOINT.get(ttype, TYPE_ENDPOINT_DEFAULT)
+            types.append({"type": ttype, "name": label, "endpoint": endpoint})
+        new_cats = [(f"{t['name']} ({t['type']})", t["endpoint"], t["type"]) for t in types]
+        QUERY_CATS = new_cats
+        return types, None
 
     def query_timetable(self, cfg):
         """获取我的课表（teachingTime.do）+ 未安排时间课程（noArranged.do）。"""
@@ -697,7 +696,7 @@ class Api:
     # ---- 前端可调用 ----
     def start(self, cfg):
         if requests is None or lite_ocr is None:
-            return {"ok": False, "msg": f"缺少依赖：{_ocr_init_error or 'pip install requests onnxruntime'}"}
+            return {"ok": False, "msg": "缺少依赖：pip install requests onnxruntime"}
         if not cfg.get("username") or not cfg.get("password"):
             return {"ok": False, "msg": "请填写学号和密码"}
         if not cfg.get("courses"):
@@ -714,7 +713,7 @@ class Api:
     def query(self, cfg, cat_index, keyword):
         """后台线程执行，结果通过 onQueryResult 回调推给前端，日志实时可见。"""
         if requests is None or lite_ocr is None:
-            self._push("onQueryResult", {"error": f"缺少依赖：{_ocr_init_error or 'requests/onnxruntime 未安装'}"})
+            self._push("onQueryResult", {"error": "缺少依赖：pip install requests onnxruntime"})
             return {"ok": True}
         try:
             cat_index = int(cat_index)
@@ -741,7 +740,7 @@ class Api:
 
     def get_selected(self, cfg):
         if requests is None or lite_ocr is None:
-            self._push("onSelected", {"error": f"缺少依赖：{_ocr_init_error or 'requests/onnxruntime 未安装'}"})
+            self._push("onSelected", {"error": "缺少依赖：pip install requests onnxruntime"})
             return {"ok": True}
         if not cfg.get("username") or not cfg.get("password") or not cfg.get("batch"):
             self._push("onSelected", {"error": "请先填学号密码并选择批次"})
@@ -776,7 +775,7 @@ class Api:
     def get_batches(self, cfg):
         """后台线程执行，结果通过 onBatches 回调推给前端。"""
         if requests is None or lite_ocr is None:
-            self._push("onBatches", {"error": f"缺少依赖：{_ocr_init_error or 'requests/onnxruntime 未安装'}"})
+            self._push("onBatches", {"error": "缺少依赖：pip install requests onnxruntime"})
             return {"ok": True}
         if not cfg.get("username") or not cfg.get("password"):
             self._push("onBatches", {"error": "请先填写学号和密码"})
@@ -794,9 +793,31 @@ class Api:
         threading.Thread(target=worker, daemon=True).start()
         return {"ok": True}
 
+    def get_course_types(self, cfg):
+        """后台线程执行，结果通过 onCourseTypes 回调推给前端。"""
+        if requests is None or lite_ocr is None:
+            self._push("onCourseTypes", {"error": "缺少依赖：pip install requests onnxruntime"})
+            return {"ok": True}
+        if not cfg.get("username") or not cfg.get("password"):
+            self._push("onCourseTypes", {"error": "请先填写学号和密码"})
+            return {"ok": True}
+
+        def worker():
+            self._log("正在获取可用课程类型…")
+            types, err = self.engine.query_course_types(cfg)
+            if err:
+                self._log(f"获取课程类型失败：{err}（将使用默认类型）")
+                self._push("onCourseTypes", {"error": err})
+            else:
+                names = ", ".join(f"{t['name']}({t['type']})" for t in types)
+                self._log(f"已获取 {len(types)} 种课程类型：{names}")
+                self._push("onCourseTypes", {"types": types})
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True}
+
     def get_timetable(self, cfg):
         if requests is None or lite_ocr is None:
-            self._push("onTimetable", {"error": f"缺少依赖：{_ocr_init_error or 'requests/onnxruntime 未安装'}"})
+            self._push("onTimetable", {"error": "缺少依赖：pip install requests onnxruntime"})
             return {"ok": True}
         if not cfg.get("username") or not cfg.get("password"):
             self._push("onTimetable", {"error": "请先填写学号和密码"})
@@ -912,7 +933,7 @@ def build_html():
 # ============================ 本地 HTTP 服务器 ============================
 # 只监听 127.0.0.1（本机），/api 与 /events 需带正确 TOKEN 才受理。
 _ALLOWED = {"start", "stop", "query", "get_selected", "withdraw",
-            "get_batches", "get_timetable", "save_config", "load_config"}
+            "get_batches", "get_course_types", "get_timetable", "save_config", "load_config"}
 _API = None          # 在 main() 中赋值为 Api 实例
 
 
@@ -1222,11 +1243,11 @@ tbody tr:hover{background:rgba(255,255,255,.04)}
           <div class="addrow">
             <input id="mName" placeholder="备注名">
             <input id="mId" class="wid" placeholder="教学班ID">
-            <select id="mType"><option>XGXK</option><option>TJKC</option><option>FANKC</option><option>TYKC</option><option>CXKC</option></select>
+            <select id="mType"><option>XGXK</option><option>TJKC</option><option>FANKC</option><option>FAWKC</option><option>TYKC</option><option>CXKC</option><option>BYKC</option><option>FXKC</option><option>QXKC</option></select>
             <input id="mBatch" placeholder="批次(可空)">
             <button class="btn" onclick="addManual()">添加</button>
           </div>
-          <div class="tip" style="margin-top:6px">XGXK 通识 / TJKC 推荐 / FANKC 主修 / TYKC 体育 / CXKC 创新创业</div>
+          <div class="tip" style="margin-top:6px">XGXK 公选 / TJKC 推荐 / FANKC 方案内 / FAWKC 方案外(跨专业) / TYKC 体育 / CXKC 重修 / BYKC 本研通选 / FXKC 辅修 / QXKC 全校</div>
         </div>
       </div>
       <div class="card log" id="logCard">
@@ -1279,7 +1300,7 @@ tbody tr:hover{background:rgba(255,255,255,.04)}
   </div>
 </div>
 <script>
-const CATS=["通识选修课 (XGXK)","推荐课程 (TJKC)","主修课程 (FANKC)","体育课程 (TYKC)","创新创业 (CXKC)"];
+let CATS=["推荐选课 (TJKC)","方案内选课 (FANKC)","方案外选课 (FAWKC)","公选课 (XGXK)","重修 (CXKC)","体育课 (TYKC)","本研通选课 (BYKC)","辅修课 (FXKC)","全校课程 (QXKC)"];
 const MODE_DESC={
   turbo:"每一轮同时给每门课发 6 个请求，轮与轮之间不停。开抢瞬间用，火力最猛，易被限流。",
   fast:"每一轮同时给每门课发 1 个请求，间隔 0.3 秒。日常均衡之选。",
@@ -1356,6 +1377,7 @@ async function fetchBatches(){
   if(!cfg.username||!cfg.password){alert("请先填写学号和密码（获取批次需要登录）");return;}
   _prevBatch=$("#batch").value;
   await callApi("get_batches",cfg);   // 结果通过 window.onBatches 回调
+  await callApi("get_course_types",cfg); // 同时获取可用课程类型
 }
 window.onBatches=function(r){
   if(!r||r.error){alert("获取批次失败："+((r&&r.error)||"未知错误"));return;}
@@ -1369,6 +1391,22 @@ window.onBatches=function(r){
   if(!sel.options.length){let o=document.createElement("option");o.value="";o.textContent="无可用批次";sel.appendChild(o);}
   let has=c=>[...sel.options].some(o=>o.value===c);
   sel.value = openCode || (has(_prevBatch)?_prevBatch:"") || (sel.options[0]&&sel.options[0].value) || "";
+};
+
+// 动态课程类型
+window.onCourseTypes=function(r){
+  if(!r||r.error) return;
+  let types=r.types||[];
+  if(!types.length) return;
+  CATS=types.map(t=>t.name+" ("+t.type+")");
+  // 刷新查询下拉
+  let qcat=$("#qcat"), prev=qcat.value; qcat.innerHTML="";
+  CATS.forEach((c,i)=>{let o=document.createElement("option");o.value=i;o.textContent=c;qcat.appendChild(o);});
+  if(prev<CATS.length) qcat.value=prev;
+  // 刷新手动添加类型下拉
+  let mt=$("#mType"), prevT=mt.value; mt.innerHTML="";
+  types.forEach(t=>{let o=document.createElement("option");o.value=t.type;o.textContent=t.type;mt.appendChild(o);});
+  if([...mt.options].some(o=>o.value===prevT)) mt.value=prevT;
 };
 
 // 我的课表
