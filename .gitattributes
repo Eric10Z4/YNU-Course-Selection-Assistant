@@ -1,0 +1,6 @@
+* -text
+*.exe binary
+*.onnx binary
+*.zip binary
+*.png binary
+*.jpg binary

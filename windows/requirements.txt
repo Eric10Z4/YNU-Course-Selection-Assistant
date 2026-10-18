@@ -1,0 +1,6 @@
+pywebview
+requests
+onnxruntime
+numpy
+Pillow
+yagmail

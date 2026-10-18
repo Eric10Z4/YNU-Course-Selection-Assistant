@@ -1,0 +1,29 @@
+name: Syntax and resource checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.10', '3.12']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile Python sources without running them
+        run: python -m compileall -q windows linux archive
+      - name: Verify packaged resources and JSON
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+          for path in Path('.').rglob('*.json'):
+              json.loads(path.read_text(encoding='utf-8-sig'))
+          for name in ('qiangke_web.py', 'lite_ocr.py', 'ocr_model.onnx', 'ocr_charset.json', 'build.py'):
+              assert (Path('windows') / name).is_file(), name

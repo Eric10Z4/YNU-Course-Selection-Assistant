@@ -1,0 +1,93 @@
+[
+  {
+    "date": "2026-07-27T01:18:14+08:00",
+    "label": "PX0 V1.0",
+    "message": "feat: 导入 PX0 V1.0 桌面选课助手",
+    "source": "Windows版本/源码/qiangke_webPX0 V1.0.py",
+    "commit": "a0f7e790ad78b4eb60046023ebc04892d4805ce1"
+  },
+  {
+    "date": "2026-07-27T01:18:14+08:00",
+    "label": "V2.0",
+    "message": "feat: 增加已选课程管理与退选界面",
+    "source": "Windows版本/源码/qiangke_web V2.0.py",
+    "commit": "ef21f8f6449cf434098d868ffa6cbddad64b7e46"
+  },
+  {
+    "date": "2026-07-27T01:18:14+08:00",
+    "label": "V2.1",
+    "message": "refactor: 使用本地 HTTP 与 SSE 连接界面和后端",
+    "source": "Windows版本/源码/qiangke_web V2.1.py",
+    "commit": "12d21ebcd1d4277407c25755f0882d131d0a7bb5"
+  },
+  {
+    "date": "2026-07-27T01:18:14+08:00",
+    "label": "V2.2",
+    "message": "fix: 改善长时间运行与事件重连",
+    "source": "Windows版本/源码/qiangke_web V2.2.py",
+    "commit": "32f374197463a5b3f1a646dcbf15815db121aa9b"
+  },
+  {
+    "date": "2026-07-27T01:18:15+08:00",
+    "label": "Linux 命令行存档",
+    "message": "feat: 归档 Linux 命令行版本与部署说明",
+    "source": "Linux版本/qiangke_linux.zip",
+    "commit": "9c2a806f10cd9d40bc34ffa048e0f6463eb419f2"
+  },
+  {
+    "date": "2026-07-27T01:24:05+08:00",
+    "label": "PX10 成品存档",
+    "message": "archive: 记录仅有成品的 PX10 版本",
+    "source": "Windows版本/成品/QiangKeWeb PX10版本.exe",
+    "commit": "b41f9ef425b5045155bb0bcb36b24b54766955fe"
+  },
+  {
+    "date": "2026-08-02T21:36:40+08:00",
+    "label": "V2.2.1",
+    "message": "fix: 修复特殊字符编码和边界处理",
+    "source": "Windows版本/源码/qiangke_web V2.2.1.py",
+    "commit": "f63f4345613deacef9d24d981aa4701357b594db"
+  },
+  {
+    "date": "2026-08-02T22:14:43+08:00",
+    "label": "独立 OCR 模块",
+    "message": "archive: 恢复原始 lite_ocr 模块",
+    "source": "旧打包工作目录/lite_ocr.py",
+    "commit": "c8daa15ba737af4f1c39b58788292662230aeae5"
+  },
+  {
+    "date": "2026-08-03T02:19:16+08:00",
+    "label": "V2.3",
+    "message": "refactor: 使用轻量 ONNX OCR 并缩减打包依赖",
+    "source": "Windows版本/源码/qiangke_web V2.3.py",
+    "commit": "cd262efa96b7ab8eab1316affa0150ab1efef3f0"
+  },
+  {
+    "date": "2026-08-03T02:20:41+08:00",
+    "label": "V2.3 以前的打包工具",
+    "message": "build: 归档早期打包工具与素材",
+    "source": "Windows版本/打包工具/打包工具（V2.3以前）",
+    "commit": "0d4d8070c8dcafcce5bff254f763cc176b0fc60b"
+  },
+  {
+    "date": "2026-08-03T02:21:59+08:00",
+    "label": "轻量 OCR 资源与构建源码",
+    "message": "build: 补齐模型字符表和构建素材",
+    "source": "Windows版本/打包工具/打包工具（V2.3以后）",
+    "commit": "ba9fdd39fdccf45b2d77a186049d9d39efb41b29"
+  },
+  {
+    "date": "2026-08-03T02:22:01+08:00",
+    "label": "独立环境打包工具",
+    "message": "build: 添加独立虚拟环境打包脚本和原始说明",
+    "source": "Windows版本/打包工具/打包工具（V2.3以后）/build.py",
+    "commit": "cf4d721d1c762c0904d5a854a93ae9c9a3cab747"
+  },
+  {
+    "date": "2026-09-01T14:38:07+08:00",
+    "label": "V2.4",
+    "message": "feat: 动态识别选课类别并支持跨专业课程",
+    "source": "Windows版本/源码/qiangke_web V2.4.py",
+    "commit": "95152aa1834cc1d6350ade49879813f3795cb719"
+  }
+]

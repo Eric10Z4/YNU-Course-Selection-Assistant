@@ -1,0 +1,28 @@
+# 本人账号、认证与运行配置
+.env
+.env.*
+!.env.example
+config.json
+qiangke_config*.json
+*cookies*.json
+*cookies*.txt
+*.har
+*.log
+*.log.*
+
+# Python / 构建产物
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.build_venv/
+build/
+dist/
+*.spec
+*.exe
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
