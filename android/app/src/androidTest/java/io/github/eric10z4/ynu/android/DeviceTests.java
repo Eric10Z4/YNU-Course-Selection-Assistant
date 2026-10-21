@@ -85,6 +85,9 @@ public final class DeviceTests {
         } finally { getInstrumentation().runOnMainSync(activity::finish); }
     }
     private MainActivity startSyntheticService() throws Exception {
+        long closed=SystemClock.elapsedRealtime()+5000;
+        while (TaskService.instance!=null && SystemClock.elapsedRealtime()<closed) Thread.sleep(50);
+        host.control.submit(()->{}).get(5,TimeUnit.SECONDS);
         if (Build.VERSION.SDK_INT>=33) {
             ParcelFileDescriptor command=getInstrumentation().getUiAutomation().executeShellCommand("pm grant "+context.getPackageName()+" android.permission.POST_NOTIFICATIONS");
             command.close();
@@ -97,6 +100,22 @@ public final class DeviceTests {
         while (TaskService.instance==null && SystemClock.elapsedRealtime()<until) Thread.sleep(50);
         assertNotNull("Foreground service started",TaskService.instance);
         return activity;
+    }
+    @Test public void testLargeTextAndKeyboardLayout() throws Exception {
+        MainActivity activity=activity();
+        try {
+            waitPage(activity);
+            getInstrumentation().runOnMainSync(()->activity.webViewForTesting().getSettings().setTextZoom(160));
+            js(activity,"tab('account'); document.getElementById('password').focus(); document.getElementById('password').scrollIntoView();");
+            getInstrumentation().runOnMainSync(()->{
+                activity.webViewForTesting().requestFocus();
+                activity.getSystemService(android.view.inputmethod.InputMethodManager.class).showSoftInput(activity.webViewForTesting(),0);
+            });
+            Thread.sleep(1000);
+            assertEquals("Large text has no horizontal overflow","true",js(activity,"document.documentElement.scrollWidth<=window.innerWidth+1"));
+            assertEquals("Password field remains editable","true",js(activity,"document.activeElement.id==='password'"));
+            report("large-text.json",new JSONObject().put("text_zoom",160).put("no_horizontal_overflow",true).put("editable_field",true).toString());
+        } finally { getInstrumentation().runOnMainSync(activity::finish); }
     }
     @Test public void testNotificationStopWithoutSchoolTraffic() throws Exception {
         MainActivity activity=startSyntheticService();
