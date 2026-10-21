@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "windows"))
+sys.path.insert(0, str(ROOT / "macos"))
 import desktop_support
 import qiangke_web as app
 

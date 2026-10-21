@@ -1,0 +1,53 @@
+name: Publish verified macOS preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Successful macOS verification run on main'
+        required: true
+        type: string
+      tag:
+        description: 'Exact tag declared in macos/app_version.py'
+        required: true
+        default: 'macos-v2.4.1-preview.1'
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: macos-preview-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate source workflow and commit
+        id: source
+        run: |
+          python -c 'import os,re; assert re.fullmatch(r"[0-9]+", os.environ["SOURCE_RUN_ID"]), "Run ID must be numeric"'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > source-run.json
+          python macos/verify_release.py --check-run source-run.json --tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          pattern: QiangKeWeb-macos-*
+          merge-multiple: true
+          path: dist/release-input
+      - name: Verify both architectures and publish complete preview
+        env:
+          SOURCE_COMMIT: ${{ steps.source.outputs.source_sha }}
+        run: python macos/verify_release.py --assets dist/release-input --expected-commit "$SOURCE_COMMIT" --tag "$RELEASE_TAG" --run-id "$SOURCE_RUN_ID" --publish

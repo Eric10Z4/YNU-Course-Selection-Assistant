@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 from unittest.mock import patch
+from app_version import VERSION, BUILD_VERSION, CHANNEL
 
 
 @contextmanager
@@ -136,6 +137,9 @@ def gui_checks(app, checks):
 def run(app, *, gui=False, report_path=None):
     report = {
         "mode": "native-gui" if gui else "offline-runtime",
+        "version": VERSION,
+        "build_version": BUILD_VERSION,
+        "channel": CHANNEL,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "system": platform.system(),
         "system_version": platform.mac_ver()[0] if sys.platform == "darwin" else platform.release(),
