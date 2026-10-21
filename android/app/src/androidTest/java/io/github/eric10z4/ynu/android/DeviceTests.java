@@ -10,6 +10,7 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 import com.chaquo.python.Python;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import java.io.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -105,12 +106,20 @@ public final class DeviceTests {
         MainActivity activity=activity();
         try {
             waitPage(activity);
-            getInstrumentation().runOnMainSync(()->activity.webViewForTesting().getSettings().setTextZoom(160));
-            js(activity,"tab('account'); document.getElementById('password').focus(); document.getElementById('password').scrollIntoView();");
             getInstrumentation().runOnMainSync(()->{
+                activity.webViewForTesting().getSettings().setTextZoom(160);
                 activity.webViewForTesting().requestFocus();
-                activity.getSystemService(android.view.inputmethod.InputMethodManager.class).showSoftInput(activity.webViewForTesting(),0);
             });
+            js(activity,"tab('account'); document.getElementById('password').scrollIntoView();");
+            Thread.sleep(300);
+            JSONArray point=new JSONArray(js(activity,"(function(){var r=document.getElementById('password').getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2,window.devicePixelRatio];})()"));
+            int[] origin=new int[2];
+            getInstrumentation().runOnMainSync(()->activity.webViewForTesting().getLocationOnScreen(origin));
+            float x=(float)(origin[0]+activity.webViewForTesting().getPaddingLeft()+point.getDouble(0)*point.getDouble(2));
+            float y=(float)(origin[1]+activity.webViewForTesting().getPaddingTop()+point.getDouble(1)*point.getDouble(2));
+            long down=SystemClock.uptimeMillis();
+            getInstrumentation().sendPointerSync(android.view.MotionEvent.obtain(down,down,android.view.MotionEvent.ACTION_DOWN,x,y,0));
+            getInstrumentation().sendPointerSync(android.view.MotionEvent.obtain(down,down+80,android.view.MotionEvent.ACTION_UP,x,y,0));
             Thread.sleep(1000);
             assertEquals("Large text has no horizontal overflow","true",js(activity,"document.documentElement.scrollWidth<=window.innerWidth+1"));
             assertEquals("Password field remains editable","true",js(activity,"document.activeElement.id==='password'"));

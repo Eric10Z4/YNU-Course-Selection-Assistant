@@ -10,7 +10,7 @@ permissions:
   contents: read
 concurrency:
   group: android-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   device:
     name: Android API ${{ matrix.api }}
@@ -56,13 +56,7 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048
-          script: |
-            mkdir -p reports/android-${{ matrix.api }}
-            trap 'adb pull /sdcard/Android/data/io.github.eric10z4.ynu.android/files/ reports/android-${{ matrix.api }}/device || true; timeout 20s adb logcat -d > reports/android-${{ matrix.api }}/emulator.log || true' EXIT
-            adb shell wm size 720x1280
-            adb shell wm density 320
-            android/gradlew -p android connectedDebugAndroidTest
-            python android/preview_smoke.py --apk android/app/build/outputs/apk/preview/app-preview.apk --output reports/android-${{ matrix.api }}/preview
+          script: bash android/run_device_checks.sh '${{ matrix.api }}'
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -45,6 +45,17 @@ public final class MainActivity extends Activity {
         });
         web.addJavascriptInterface(new Bridge(), "YnuNative");
         setContentView(web);
+        if (Build.VERSION.SDK_INT >= 30) {
+            web.post(() -> {
+                WindowInsetsController bars=getWindow().getInsetsController();
+                if (bars != null) bars.setSystemBarsAppearance(WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+            });
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+            getWindow().setStatusBarColor(Color.rgb(245,247,251));
+            getWindow().setNavigationBarColor(Color.rgb(245,247,251));
+        }
         web.setOnApplyWindowInsetsListener((view, insets) -> {
             int left, top, right, bottom;
             if (Build.VERSION.SDK_INT >= 30) {
