@@ -85,14 +85,20 @@ public final class DeviceTests {
         }
         fail("Native connectivity callback did not reach available="+available);
     }
+    private void wifi(boolean enabled) throws Exception {
+        if (Build.VERSION.SDK_INT<29) {
+            android.net.wifi.WifiManager manager=(android.net.wifi.WifiManager)context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            assertTrue("Legacy test Wi-Fi control accepted",manager.setWifiEnabled(enabled));
+        } else shell("svc wifi "+(enabled?"enable":"disable"));
+    }
     @Test(timeout=120000) public void testNativeConnectivityDisconnectAndRestore() throws Exception {
         org.junit.Assume.assumeTrue("Only toggle test-emulator radios",Build.HARDWARE.equals("ranchu") || Build.HARDWARE.equals("goldfish"));
         try {
-            shell("svc wifi disable"); shell("svc data disable"); waitNetwork(false);
-            shell("svc wifi enable"); shell("svc data enable"); waitNetwork(true);
-            shell("svc wifi disable"); shell("svc data disable"); waitNetwork(false);
+            wifi(false); shell("svc data disable"); waitNetwork(false);
+            wifi(true); shell("svc data enable"); waitNetwork(true);
+            wifi(false); shell("svc data disable"); waitNetwork(false);
         } finally {
-            shell("svc wifi enable"); shell("svc data enable");
+            wifi(true); shell("svc data enable");
         }
         waitNetwork(true);
         report("connectivity.json",new JSONObject().put("native_disconnect",true).put("native_restore",true).toString());

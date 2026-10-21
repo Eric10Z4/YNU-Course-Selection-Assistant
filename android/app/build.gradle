@@ -25,6 +25,7 @@ android {
     }
     buildTypes {
         debug {
+            applicationIdSuffix '.debug'
             if (System.getenv('ANDROID_PREVIEW_KEYSTORE_FILE')) signingConfig signingConfigs.preview
         }
         preview {
