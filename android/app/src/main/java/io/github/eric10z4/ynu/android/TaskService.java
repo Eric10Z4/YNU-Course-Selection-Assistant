@@ -13,6 +13,7 @@ public final class TaskService extends Service {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private PowerManager.WakeLock wakeLock;
     private long started;
+    private long generation;
     private volatile boolean destroyed;
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
@@ -43,6 +44,7 @@ public final class TaskService extends Service {
     @Override public void onCreate() {
         instance = this;
         super.onCreate(); started = SystemClock.elapsedRealtime();
+        generation = RuntimeHost.get(this).serviceGeneration;
         NotificationManager manager = getSystemService(NotificationManager.class);
         manager.createNotificationChannel(new NotificationChannel("tasks", "选课任务", NotificationManager.IMPORTANCE_LOW));
         if (Build.VERSION.SDK_INT >= 29) startForeground(7, notification("正在准备任务"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
@@ -52,11 +54,12 @@ public final class TaskService extends Service {
         handler.post(heartbeat);
     }
     @Override public int onStartCommand(Intent intent, int flags, int id) {
+        generation = RuntimeHost.get(this).serviceGeneration;
         if (intent != null && STOP.equals(intent.getAction())) { RuntimeHost.get(this).stop("用户从通知栏停止任务"); stopSelf(); }
         return START_NOT_STICKY;
     }
     @Override public void onTimeout(int startId, int type) {
-        RuntimeHost.get(this).stop("系统后台运行时限已到，任务已暂停，请手动核对恢复");
+        RuntimeHost.get(this).serviceEnded("系统后台运行时限已到，任务已暂停，请手动核对恢复", generation, false);
         stopSelf();
     }
     @Override public void onDestroy() {
@@ -64,11 +67,7 @@ public final class TaskService extends Service {
         destroyed = true;
         handler.removeCallbacksAndMessages(null);
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-        RuntimeHost host = RuntimeHost.get(this);
-        host.control.execute(() -> {
-            JSONObject snapshot = host.snapshot();
-            if (snapshot != null && snapshot.optBoolean("active")) host.stop("后台服务已结束；请核对后手动恢复");
-        });
+        RuntimeHost.get(this).serviceEnded("后台服务已结束；请核对后手动恢复", generation, true);
         stopForeground(STOP_FOREGROUND_REMOVE); super.onDestroy();
     }
     @Override public IBinder onBind(Intent intent) { return null; }

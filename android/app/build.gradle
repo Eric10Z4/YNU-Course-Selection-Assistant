@@ -10,7 +10,7 @@ android {
         versionCode 1
         versionName '0.1.0-preview.1'
         ndk { abiFilters 'arm64-v8a', 'x86_64' }
-        testInstrumentationRunner 'android.test.InstrumentationTestRunner'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
     buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
@@ -43,4 +43,6 @@ tasks.configureEach {
 dependencies {
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.23.2'
     testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'junit:junit:4.13.2'
 }

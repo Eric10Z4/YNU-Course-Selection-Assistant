@@ -13,6 +13,7 @@ public final class RuntimeHost {
     public final NativeOcr ocr;
     public final CredentialVault vault;
     private volatile PyObject module;
+    volatile long serviceGeneration;
     private volatile String initializationError;
     private volatile String network = "{\"available\":false,\"captive\":false,\"validated\":false}";
     public static synchronized RuntimeHost get(Context context) {
@@ -48,5 +49,12 @@ public final class RuntimeHost {
     }
     public void stop(String message) {
         control.execute(() -> { if (module != null) module.callAttr("stop", message); });
+    }
+    public void serviceEnded(String message, long generation, boolean onlyIfActive) {
+        control.execute(() -> {
+            if (module == null || serviceGeneration != generation) return;
+            JSONObject current = snapshot();
+            if (!onlyIfActive || (current != null && current.optBoolean("active"))) module.callAttr("stop", message);
+        });
     }
 }

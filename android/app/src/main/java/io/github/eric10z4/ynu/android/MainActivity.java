@@ -83,7 +83,7 @@ public final class MainActivity extends Activity {
                         requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
                         result(id,"{\"ok\":false,\"msg\":\"请允许任务通知后，再点击开始\"}"); return;
                     }
-                    try { startForegroundService(new Intent(MainActivity.this, TaskService.class)); host.actions.execute(action); }
+                    try { host.serviceGeneration++; startForegroundService(new Intent(MainActivity.this, TaskService.class)); host.actions.execute(action); }
                     catch (Exception e) { result(id,"{\"ok\":false,\"msg\":\"系统未允许后台服务，请保持前台后重试\"}"); }
                 });
             } else if (method.equals("snapshot") || method.equals("stop")) host.control.execute(action);

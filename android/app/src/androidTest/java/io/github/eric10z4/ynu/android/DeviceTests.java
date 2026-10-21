@@ -4,7 +4,10 @@ import android.app.*;
 import android.content.*;
 import android.graphics.*;
 import android.os.*;
-import android.test.InstrumentationTestCase;
+import androidx.test.platform.app.InstrumentationRegistry;
+import org.junit.Before;
+import org.junit.Test;
+import static org.junit.Assert.*;
 import com.chaquo.python.Python;
 import org.json.JSONObject;
 import java.io.*;
@@ -12,11 +15,12 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 @SuppressWarnings("deprecation")
-public final class DeviceTests extends InstrumentationTestCase {
+public final class DeviceTests {
     private Context context;
     private RuntimeHost host;
-    @Override protected void setUp() throws Exception {
-        super.setUp(); context=getInstrumentation().getTargetContext(); host=RuntimeHost.get(context);
+    private Instrumentation getInstrumentation() { return InstrumentationRegistry.getInstrumentation(); }
+    @Before public void setUp() throws Exception {
+        context=getInstrumentation().getTargetContext(); host=RuntimeHost.get(context);
         long until=SystemClock.elapsedRealtime()+60000;
         while (!host.ready() && SystemClock.elapsedRealtime()<until) Thread.sleep(100);
         assertTrue("Python/requests/shared engine initialization",host.ready());
@@ -42,11 +46,11 @@ public final class DeviceTests extends InstrumentationTestCase {
         }
         fail("Mobile page/JavaScript did not initialize");
     }
-    public void testRecoveryScenariosInsideAndroidPython() throws Exception {
+    @Test public void testRecoveryScenariosInsideAndroidPython() throws Exception {
         String result=Python.getInstance().getModule("test_android").callAttr("run_device_tests").toString();
         report("recovery.json",result); assertTrue(result,new JSONObject(result).getBoolean("passed"));
     }
-    public void testNativeOcrAndTransparentImage() throws Exception {
+    @Test public void testNativeOcrAndTransparentImage() throws Exception {
         Bitmap blank=Bitmap.createBitmap(120,40,Bitmap.Config.ARGB_8888); blank.eraseColor(Color.WHITE);
         ByteArrayOutputStream bytes=new ByteArrayOutputStream(); blank.compress(Bitmap.CompressFormat.PNG,100,bytes);
         String white=host.ocr.classify(bytes.toByteArray());
@@ -55,7 +59,7 @@ public final class DeviceTests extends InstrumentationTestCase {
         assertEquals("Transparent pixels composite over white",white,transparent);
         report("ocr.json",new JSONObject().put("passed",true).put("scope","synthetic blank/transparent inference; no recognition-rate claim").toString());
     }
-    public void testPasswordIsOptInAndEncrypted() throws Exception {
+    @Test public void testPasswordIsOptInAndEncrypted() throws Exception {
         host.vault.save("{\"password\":\"synthetic-test-password\",\"remember\":false}");
         assertFalse(new JSONObject(host.vault.load()).has("password"));
         host.vault.save("{\"password\":\"synthetic-test-password\",\"remember\":true}");
@@ -63,7 +67,7 @@ public final class DeviceTests extends InstrumentationTestCase {
         String stored=context.getSharedPreferences("private_config",Context.MODE_PRIVATE).getString("encrypted","");
         assertFalse(stored.contains("synthetic-test-password")); host.vault.save("{}");
     }
-    public void testWebViewBridgeAndSmallScreen() throws Exception {
+    @Test public void testWebViewBridgeAndSmallScreen() throws Exception {
         MainActivity activity=activity();
         try {
             waitPage(activity);
@@ -94,7 +98,7 @@ public final class DeviceTests extends InstrumentationTestCase {
         assertNotNull("Foreground service started",TaskService.instance);
         return activity;
     }
-    public void testNotificationStopWithoutSchoolTraffic() throws Exception {
+    @Test public void testNotificationStopWithoutSchoolTraffic() throws Exception {
         MainActivity activity=startSyntheticService();
         try {
             assertTrue(host.snapshot().getBoolean("active"));
@@ -105,7 +109,7 @@ public final class DeviceTests extends InstrumentationTestCase {
             assertEquals("stopped",host.snapshot().getString("state"));
         } finally { getInstrumentation().runOnMainSync(activity::finish); }
     }
-    public void testSystemTimeoutCallbackStopsService() throws Exception {
+    @Test public void testSystemTimeoutCallbackStopsService() throws Exception {
         if (Build.VERSION.SDK_INT<35) return;
         MainActivity activity=startSyntheticService();
         try {

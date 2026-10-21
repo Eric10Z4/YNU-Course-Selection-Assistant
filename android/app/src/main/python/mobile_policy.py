@@ -42,6 +42,12 @@ class Journal:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)
+            if os.name != 'nt':
+                descriptor = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
 
     def set(self, state, message, **values):
         with self.lock:
