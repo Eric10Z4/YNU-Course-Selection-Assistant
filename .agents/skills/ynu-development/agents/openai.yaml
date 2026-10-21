@@ -1,0 +1,4 @@
+interface:
+  display_name: "YNU 项目开发"
+  short_description: "维护 YNU 选课助手，按阶段验证桌面构建、平台适配和真实运行证据"
+  default_prompt: "使用 $ynu-development 推进当前阶段的改造，并记录相关验证结果。"

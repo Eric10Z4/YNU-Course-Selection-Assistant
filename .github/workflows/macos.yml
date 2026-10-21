@@ -1,0 +1,73 @@
+name: macOS build and offline verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - 'macos/**'
+      - 'tests/**'
+      - '.github/workflows/macos.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'macos/**'
+      - 'tests/**'
+      - '.github/workflows/macos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: ${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r macos/requirements-build.txt -c 'macos/constraints-${{ matrix.arch }}.txt'
+          mkdir -p reports
+          python -m pip freeze > reports/dependencies.txt
+      - name: Run desktop behavior tests
+        run: python -m unittest discover -s tests -v
+      - name: Verify source runtime without school requests
+        run: python macos/main.py --self-test --report reports/source-runtime.json
+      - name: Build native application
+        run: python macos/build.py --arch '${{ matrix.arch }}'
+      - name: Verify copied bundle, OCR, native GUI and SSE
+        run: python macos/check_bundle.py --app 'dist/macos/${{ matrix.arch }}/QiangKeWeb.app' --arch '${{ matrix.arch }}' --reports reports
+      - name: Package test application
+        run: ditto -c -k --sequesterRsrc --keepParent 'dist/macos/${{ matrix.arch }}/QiangKeWeb.app' 'dist/QiangKeWeb-macos-${{ matrix.arch }}.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QiangKeWeb-macos-${{ matrix.arch }}
+          path: dist/QiangKeWeb-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-verification-${{ matrix.arch }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 14

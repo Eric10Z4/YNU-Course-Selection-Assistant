@@ -20,6 +20,8 @@ build/
 dist/
 *.spec
 *.exe
+*.app/
+reports/
 
 # 编辑器 / 系统
 .idea/

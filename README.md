@@ -4,6 +4,8 @@
 
 [下载 Windows V2.4](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases/tag/v2.4) · [所有版本](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases) · [更新日志](CHANGELOG.md) · [历史与时间来源](docs/HISTORY.md)
 
+跨平台开发：[开发流程](docs/DEVELOPMENT.md) · [macOS / 安卓 / iOS 改造计划](docs/ROADMAP.md) · [验收矩阵](docs/TEST_MATRIX.md) · [当前验证进度](docs/progress/2026-10-21-macos.md)。Mac 验证先行，移动端仍处于计划阶段。
+
 ## 能做什么
 
 | 功能 | Windows V2.4 | Linux 存档 |
@@ -32,6 +34,10 @@ python -m venv .venv
 
 桌面窗口需要系统可用的 WebView2 环境。需要自行打包时，在 `windows` 目录执行 `python build.py`；脚本会建立 `.build_venv` 并生成 `dist/QiangKeWeb.exe`。详见 [构建说明](docs/BUILD.md)。
 
+## macOS 验证版
+
+Apple Silicon 与 Intel 的原生构建、离线 OCR 和原生窗口/API/SSE 自动检查已通过，人工交互和真实业务仍待验收；证据见 [当前验证记录](docs/progress/2026-10-21-macos.md)。源码运行、两种芯片架构的构建及测试包说明见 [macOS 指南](docs/MACOS.md)。测试包与正式签名、公证分别记录。
+
 ## Linux 使用
 
 ```bash
@@ -48,6 +54,8 @@ python qiangke_cli.py batches
 
 ```text
 windows/           当前 V2.4 源码、找回的 OCR 模块、模型和构建资源
+macos/             macOS 入口、构建与离线/原生 GUI 验证
+tests/             桌面平台行为检查
 linux/             原始 Linux 压缩包解出的文件
 archive/windows/   各版原始源码与两套打包工具，保持字节内容不变
 archive/linux/     原始 Linux 压缩包

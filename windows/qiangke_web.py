@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote, urlencode
+from desktop_support import default_config_path, find_resource, set_macos_awake
 
 try:
     import webview
@@ -125,6 +126,12 @@ def keep_awake(on):
     只在抢课/等待开始期间开启，停止后恢复，空闲时电脑照常正常休眠。
     注意：这挡不住“合上笔记本盖子”触发的睡眠——长期挂机建议插电、且把合盖动作设为“不采取操作”。
     """
+    if sys.platform == "darwin":
+        try:
+            set_macos_awake(on)
+        except OSError:
+            pass
+        return
     if sys.platform != "win32":
         return
     try:
@@ -140,19 +147,7 @@ def keep_awake(on):
 
 
 def resource_path(name):
-    cands = []
-    base = getattr(sys, "_MEIPASS", None)
-    if base:
-        cands.append(os.path.join(base, name))
-    try:
-        cands.append(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), name))
-    except Exception:
-        pass
-    cands.append(os.path.join(os.getcwd(), name))
-    for p in cands:
-        if p and os.path.exists(p):
-            return p
-    return None
+    return find_resource(name, __file__)
 
 
 # ============================ 抢课引擎（与界面无关，可复用） ============================
@@ -845,12 +840,16 @@ class Api:
                 path = self.window.create_file_dialog(
                     webview.SAVE_DIALOG, save_filename="qiangke_config.json",
                     file_types=("JSON (*.json)",))
+                if not path:
+                    return {"ok": False, "cancelled": True}
             except Exception:
                 path = None
             if isinstance(path, (list, tuple)):
                 path = path[0] if path else None
             if not path:
-                path = os.path.join(os.getcwd(), "qiangke_config.json")
+                path = default_config_path()
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path = str(path)
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, ensure_ascii=False, indent=2)
             self._log(f"已保存配置：{path}")
@@ -860,7 +859,10 @@ class Api:
 
     def load_config(self):
         try:
-            path = self.window.create_file_dialog(webview.OPEN_DIALOG, file_types=("JSON (*.json)",))
+            if self.window is None:
+                path = str(default_config_path())
+            else:
+                path = self.window.create_file_dialog(webview.OPEN_DIALOG, file_types=("JSON (*.json)",))
             if isinstance(path, (list, tuple)):
                 path = path[0] if path else None
             if not path:
@@ -1658,7 +1660,7 @@ def _dark_titlebar_later(title):
     threading.Thread(target=worker, daemon=True).start()
 
 
-def main():
+def main(on_loaded=None):
     global TOKEN, _API
     TOKEN = secrets.token_urlsafe(16)
     title = "YNU 抢课助手"
@@ -1669,25 +1671,33 @@ def main():
     srv, port = start_server()
     url = f"http://127.0.0.1:{port}/?t={TOKEN}"
 
-    if webview is None:
-        # 没装 pywebview 也能用：直接用系统默认浏览器打开，服务器保持运行
-        print(f"未检测到 pywebview，已在浏览器打开：{url}")
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
-        try:
-            while True:
-                time.sleep(3600)
-        except KeyboardInterrupt:
-            pass
-        return
+    try:
+        if webview is None:
+            # 没装 pywebview 也能用：直接用系统默认浏览器打开，服务器保持运行
+            print(f"未检测到 pywebview，已在浏览器打开：{url}")
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+            try:
+                while True:
+                    time.sleep(3600)
+            except KeyboardInterrupt:
+                pass
+            return
 
-    win = webview.create_window(title, url=url, width=1240, height=830,
-                                min_size=(1060, 720), background_color="#0d0d13")
-    api.window = win
-    _dark_titlebar_later(title)
-    webview.start()
+        win = webview.create_window(title, url=url, width=1240, height=830,
+                                    min_size=(1060, 720), background_color="#0d0d13")
+        api.window = win
+        if on_loaded is not None:
+            win.events.loaded += lambda: on_loaded(win, api)
+        _dark_titlebar_later(title)
+        webview.start()
+    finally:
+        api.engine.stop()
+        keep_awake(False)
+        srv.shutdown()
+        srv.server_close()
 
 
 if __name__ == "__main__":

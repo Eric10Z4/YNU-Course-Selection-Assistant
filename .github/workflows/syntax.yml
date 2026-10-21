@@ -17,7 +17,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Compile Python sources without running them
-        run: python -m compileall -q windows linux archive
+        run: python -m compileall -q windows linux archive macos tests
+      - name: Verify desktop platform behavior
+        run: python -m unittest discover -s tests -v
       - name: Verify packaged resources and JSON
         shell: python
         run: |
