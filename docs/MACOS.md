@@ -9,7 +9,7 @@ macOS 入口复用 `windows/` 中的当前桌面引擎；目录名称是历史�
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r macos/requirements-build.txt
+python -m pip install -r macos/requirements-build.txt -c "macos/constraints-$(uname -m).txt"
 python macos/main.py
 ```
 
@@ -43,9 +43,11 @@ python macos/check_bundle.py \
 
 ## CI 与测试包
 
-`.github/workflows/macos.yml` 分别在 `macos-15` / `macos-15-intel` 上构建 arm64 / x86_64。成功后保存使用 ditto 打包的应用 ZIP；另存 JSON 报告、运行输出和实际依赖版本。请下载对应运行的 artifact，不能把其它提交或单一架构的结果套用到当前版本。
+`.github/workflows/macos.yml` 对相关路径的 PR、main 推送或手动触发运行，分别在 `macos-15` / `macos-15-intel` 上构建 arm64 / x86_64。成功后保存使用 ditto 打包的应用 ZIP；另存 JSON 报告、运行输出和实际依赖版本。请下载对应运行的 artifact，不能把其它提交或单一架构的结果套用到当前版本。
 
-构建使用隔离 runner；当前依赖版本在每个 artifact 中记录。形成稳定基线后再锁定经过验证的依赖组合。
+构建使用隔离 runner；`constraints-arm64.txt` / `constraints-x86_64.txt` 保存首次原生验证通过的依赖组合，CI 同时约束版本并记录本次实际安装结果。它们是版本约束，不是带哈希的完整锁文件，不保证安装包逐字节复现。升级依赖需在对应架构重新验证。
+
+首次基线中 arm64 使用 ONNX Runtime 1.31.0，Intel 使用 1.23.2，不能把一端的安装结果直接套用于另一端。
 
 ## 配置与电源行为
 

@@ -35,6 +35,8 @@
 
 Mac 构建、资源/OCR、本机服务和原生 GUI 检查跑通后，使用 `skill-creator` 把实际有效的阅读顺序、验证命令和状态报告提炼成仓库内的 `ynu-development` skill。
 
+2026-10-21 两种架构的上述链路通过后，已创建 [项目 skill](../.agents/skills/ynu-development/SKILL.md)。打开本仓库后可用 `$ynu-development` 调用；它引用现有文档及脚本，不重新维护另一份计划或测试实现。
+
 Skill 只编码稳定、可重复的过程，并链接本项目文档；不复制整份路线图，不把移动端计划写成已验证流程。安装包不能替代真实业务验收。
 
 ## 依据
