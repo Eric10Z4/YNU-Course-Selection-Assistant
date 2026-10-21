@@ -155,6 +155,19 @@ class RuntimeTests(unittest.TestCase):
         for _ in range(20): gate.check_budget()
         with self.assertRaises(OSError): gate.check_budget()
 
+    def test_stopped_state_cannot_be_overwritten_by_worker_transition(self):
+        self.runtime.stop()
+        self.assertFalse(self.runtime.transition('running', 'synthetic late worker'))
+        self.assertEqual(self.runtime.snapshot()['state'], 'stopped')
+
+    def test_recheck_does_not_claim_a_worker_is_running(self):
+        self.runtime.journal.begin(CFG)
+        self.runtime.journal.pending(CFG['courses'][0])
+        self.runtime.engine.selected.add('class-a')
+        self.assertTrue(self.runtime.command('recheck', CFG)['ok'])
+        self.assertEqual(self.runtime.snapshot()['state'], 'stopped')
+        self.assertFalse(self.runtime.snapshot()['active'])
+
 
 class AuthSessionTests(unittest.TestCase):
     def test_existing_authentication_and_cookie_contract_without_network(self):

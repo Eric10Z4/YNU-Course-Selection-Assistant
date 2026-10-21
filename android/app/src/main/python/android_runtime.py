@@ -178,12 +178,20 @@ class Runtime:
         return {'ok': True}
 
     def stop(self, message='已停止；不会自动恢复'):
-        self.stop_event.set()
-        self.engine.stop()
-        self.journal.stop(message)
+        with self.guard:
+            self.stop_event.set()
+            self.engine.stop()
+            self.journal.stop(message)
         with self.gate.condition:
             self.gate.condition.notify_all()
         return {'ok': True}
+
+    def transition(self, state, message):
+        with self.guard:
+            if self.stop_event.is_set():
+                return False
+            self.journal.set(state, message)
+            return True
 
     def reconcile(self, cfg):
         data = self.journal.snapshot()
@@ -196,9 +204,10 @@ class Runtime:
             if error:
                 raise OSError('学校查询失败或登录失效，请稍后重试')
             selected[batch] = {str(item['teachingClassID']) for item in items}
-        if self.stop_event.is_set():
-            return False
-        return self.journal.reconcile(selected)
+        with self.guard:
+            if self.stop_event.is_set():
+                return False
+            return self.journal.reconcile(selected)
 
     def submit(self, course, cfg):
         if self.stop_event.is_set():
@@ -207,8 +216,10 @@ class Runtime:
             raise OSError('登录未成功，暂停并退避')
         if self.stop_event.is_set():
             return
-        self.journal.pending(course)
-        self.journal.save()  # Durable before the first mutating byte is sent.
+        with self.guard:
+            if self.stop_event.is_set():
+                return
+            self.journal.pending(course)  # Durable before the first mutating byte.
         body = {'data': {'operationType': '1', 'studentCode': cfg['username'],
                         'electiveBatchCode': course.get('batch') or cfg['batch'],
                         'teachingClassId': course['id'], 'isMajor': '1',
@@ -238,15 +249,15 @@ class Runtime:
         try:
             while not self.stop_event.is_set():
                 if time.monotonic() >= deadline:
-                    self.journal.set('expired', '本次运行时间已到，请手动决定是否继续')
+                    self.transition('expired', '本次运行时间已到，请手动决定是否继续')
                     return
                 start_at = float(cfg.get('start_at_ms') or 0) / 1000
                 if start_at > time.time():
-                    self.journal.set('waiting_start', '等待计划时间；通知栏可随时停止')
+                    if not self.transition('waiting_start', '等待计划时间；通知栏可随时停止'): return
                     self.stop_event.wait(min(5, start_at - time.time()))
                     continue
                 if not self.gate.available():
-                    self.journal.set('waiting_network', '等待可用网络；校园网认证请先完成')
+                    if not self.transition('waiting_network', '等待可用网络；校园网认证请先完成'): return
                     self.stop_event.wait(2)
                     continue
                 current_generation = self.gate.snapshot()['generation']
@@ -254,31 +265,34 @@ class Runtime:
                     try:
                         self.gate.begin_operation()
                         if current_generation != generation or self.journal.snapshot().get('pending'):
-                            self.journal.set('reconciling', '网络恢复，正在核对登录和已选结果')
+                            if not self.transition('reconciling', '网络恢复，正在核对登录和已选结果'): return
                             self.engine.invalidate_auth()
                             if not self.reconcile(cfg):
                                 return
                             generation = current_generation
                         courses = [c for c in self.journal.snapshot()['courses'] if c['state'] != 'succeeded']
                         if not courses:
-                            self.journal.set('completed', '全部目标课程已确认选上')
+                            self.transition('completed', '全部目标课程已确认选上')
                             return
-                        self.journal.set('running', '正在执行；提交异常时先核对')
+                        if not self.transition('running', '正在执行；提交异常时先核对'): return
                         self.submit(courses[cursor % len(courses)], cfg)
                         cursor += 1
                         failures = 0
                     except Exception as exc:
+                        if self.stop_event.is_set():
+                            return
                         failures += 1
                         self.log(f'请求未完成（{type(exc).__name__}），先等待再核对')
                         generation = -1
                         if failures >= 5:
-                            self.journal.set('needs_review', '连续请求或登录失败，已暂停，请检查网络和账号')
+                            self.transition('needs_review', '连续请求或登录失败，已暂停，请检查网络和账号')
                             return
                 self.stop_event.wait(max(cfg['interval'], min(60, 2 ** failures) if failures else 0))
         finally:
             # Preserve the stopped/interrupted/uncertain state; never auto-start.
-            if self.journal.snapshot()['state'] in {'running', 'submitting', 'reconciling'}:
-                self.journal.set('interrupted', '任务已中断，请核对后恢复')
+            with self.guard:
+                if self.journal.snapshot()['state'] in {'running', 'submitting', 'reconciling'}:
+                    self.journal.set('interrupted', '任务已中断，请核对后恢复')
 
     def command(self, method, cfg, extra=None):
         extra = extra or {}
@@ -315,6 +329,8 @@ class Runtime:
                 self.check_identity(cfg)
                 self.stop_event.clear()
                 resolved = self.reconcile(cfg)
+                if resolved:
+                    self.journal.set('stopped', '核对完成，请手动恢复任务')
                 return {'ok': resolved, 'msg': self.journal.snapshot()['message']}
             elif method == 'confirm_review':
                 self.check_identity(cfg)
