@@ -29,6 +29,11 @@ public final class DeviceTests {
     private void report(String name,String text) throws Exception {
         File directory=context.getExternalFilesDir(null); assertNotNull(directory);
         try (FileOutputStream out=new FileOutputStream(new File(directory,name))) { out.write(text.getBytes("UTF-8")); }
+        // Gradle may uninstall the tested app before adb can collect its data.
+        // Keep only these synthetic reports in the test emulator's shell area.
+        shell("mkdir -p /data/local/tmp/ynu-device-reports");
+        shell("echo "+android.util.Base64.encodeToString(text.getBytes("UTF-8"),android.util.Base64.NO_WRAP)+
+            " | base64 -d > /data/local/tmp/ynu-device-reports/"+name);
     }
     private MainActivity activity() {
         Intent intent=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -77,6 +82,7 @@ public final class DeviceTests {
     @Test public void testNativeConnectivityDisconnectAndRestore() throws Exception {
         org.junit.Assume.assumeTrue("Only toggle test-emulator radios",Build.HARDWARE.equals("ranchu") || Build.HARDWARE.equals("goldfish"));
         try {
+            shell("svc wifi disable"); shell("svc data disable"); waitNetwork(false);
             shell("svc wifi enable"); shell("svc data enable"); waitNetwork(true);
             shell("svc wifi disable"); shell("svc data disable"); waitNetwork(false);
         } finally {
