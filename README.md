@@ -4,6 +4,8 @@
 
 [下载 Windows V2.4](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases/tag/v2.4) · [所有版本](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases) · [更新日志](CHANGELOG.md) · [历史与时间来源](docs/HISTORY.md)
 
+跨平台开发：[开发流程](docs/DEVELOPMENT.md) · [macOS / 安卓 / iOS 改造计划](docs/ROADMAP.md) · [验收矩阵](docs/TEST_MATRIX.md) · [当前验证进度](docs/progress/2026-10-21-macos.md)。Mac 验证先行，移动端仍处于计划阶段。
+
 ## 能做什么
 
 | 功能 | Windows V2.4 | Linux 存档 |
