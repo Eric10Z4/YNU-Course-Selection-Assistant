@@ -60,6 +60,31 @@ public final class DeviceTests {
         assertEquals("Transparent pixels composite over white",white,transparent);
         report("ocr.json",new JSONObject().put("passed",true).put("scope","synthetic blank/transparent inference; no recognition-rate claim").toString());
     }
+    private void shell(String command) throws Exception {
+        try (InputStream stream=new ParcelFileDescriptor.AutoCloseInputStream(getInstrumentation().getUiAutomation().executeShellCommand(command))) {
+            byte[] buffer=new byte[1024]; while (stream.read(buffer)!=-1) { }
+        }
+    }
+    private void waitNetwork(boolean available) throws Exception {
+        long until=SystemClock.elapsedRealtime()+25000;
+        while (SystemClock.elapsedRealtime()<until) {
+            JSONObject current=host.snapshot();
+            if (current!=null && current.getJSONObject("network").getBoolean("available")==available) return;
+            Thread.sleep(200);
+        }
+        fail("Native connectivity callback did not reach available="+available);
+    }
+    @Test public void testNativeConnectivityDisconnectAndRestore() throws Exception {
+        org.junit.Assume.assumeTrue("Only toggle test-emulator radios",Build.HARDWARE.equals("ranchu") || Build.HARDWARE.equals("goldfish"));
+        try {
+            shell("svc wifi enable"); shell("svc data enable"); waitNetwork(true);
+            shell("svc wifi disable"); shell("svc data disable"); waitNetwork(false);
+        } finally {
+            shell("svc wifi enable"); shell("svc data enable");
+        }
+        waitNetwork(true);
+        report("connectivity.json",new JSONObject().put("native_disconnect",true).put("native_restore",true).toString());
+    }
     @Test public void testPasswordIsOptInAndEncrypted() throws Exception {
         host.vault.save("{\"password\":\"synthetic-test-password\",\"remember\":false}");
         assertFalse(new JSONObject(host.vault.load()).has("password"));
