@@ -10,6 +10,12 @@ from urllib.parse import quote, urlsplit
 from mobile_policy import Journal, public_config
 
 
+def elapsed():
+    # Linux/Android BOOTTIME includes deep sleep, unlike CLOCK_MONOTONIC.
+    clock = getattr(time, 'CLOCK_BOOTTIME', None)
+    return time.clock_gettime(clock) if clock is not None else time.monotonic()
+
+
 class NativeOcr:
     def __init__(self, native):
         self.native = native
@@ -101,6 +107,8 @@ class Runtime:
         self.cfg = {}
         self.log_id = 0
         self.auth_account = None
+        self.deadline = None
+        self.execution_started = False
         self.desktop = None
         if engine_factory is None:
             engine_factory, self.desktop = load_engine(native_ocr)
@@ -173,6 +181,8 @@ class Runtime:
             self.journal.begin(cfg, resume)
             self.stop_event.clear()
             self.engine.stop_flag.clear()
+            self.deadline = elapsed() + cfg['duration_minutes'] * 60
+            self.execution_started = False
             self.worker = threading.Thread(target=self.run, args=(cfg,), daemon=True)
             self.worker.start()
         return {'ok': True}
@@ -219,6 +229,11 @@ class Runtime:
         with self.guard:
             if self.stop_event.is_set():
                 return
+            if self.deadline is not None and elapsed() >= self.deadline:
+                self.stop_event.set()
+                self.engine.stop()
+                self.journal.set('expired', '本次运行时间已到，未再发送提交')
+                return
             self.journal.pending(course)  # Durable before the first mutating byte.
         body = {'data': {'operationType': '1', 'studentCode': cfg['username'],
                         'electiveBatchCode': course.get('batch') or cfg['batch'],
@@ -242,16 +257,19 @@ class Runtime:
         self.log(f"{course['name']}：{'已成功' if code == '1' else '本次未成功'}")
 
     def run(self, cfg):
-        deadline = time.monotonic() + cfg['duration_minutes'] * 60
+        deadline = self.deadline
         generation = -1
         failures = 0
         cursor = 0
         try:
             while not self.stop_event.is_set():
-                if time.monotonic() >= deadline:
+                if elapsed() >= deadline:
                     self.transition('expired', '本次运行时间已到，请手动决定是否继续')
                     return
                 start_at = float(cfg.get('start_at_ms') or 0) / 1000
+                if start_at and not self.execution_started and time.time() - start_at > 120:
+                    self.transition('expired', '错过计划时间超过两分钟，请重新设置后手动开始')
+                    return
                 if start_at > time.time():
                     if not self.transition('waiting_start', '等待计划时间；通知栏可随时停止'): return
                     self.stop_event.wait(min(5, start_at - time.time()))
@@ -275,6 +293,7 @@ class Runtime:
                             self.transition('completed', '全部目标课程已确认选上')
                             return
                         if not self.transition('running', '正在执行；提交异常时先核对'): return
+                        self.execution_started = True
                         self.submit(courses[cursor % len(courses)], cfg)
                         cursor += 1
                         failures = 0

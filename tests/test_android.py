@@ -168,6 +168,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.runtime.snapshot()['state'], 'stopped')
         self.assertFalse(self.runtime.snapshot()['active'])
 
+    def test_expired_during_login_does_not_send_a_late_submission(self):
+        self.runtime.journal.begin(CFG)
+        def delayed_login(*_):
+            self.runtime.deadline = -1
+            return True
+        self.runtime.engine.ensure_login = delayed_login
+        self.runtime.submit(CFG['courses'][0], CFG)
+        self.assertEqual(self.runtime.engine.submissions, 0)
+        self.assertEqual(self.runtime.snapshot()['state'], 'expired')
+
 
 class AuthSessionTests(unittest.TestCase):
     def test_existing_authentication_and_cookie_contract_without_network(self):
