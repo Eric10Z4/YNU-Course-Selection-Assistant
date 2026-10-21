@@ -178,6 +178,15 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.runtime.engine.submissions, 0)
         self.assertEqual(self.runtime.snapshot()['state'], 'expired')
 
+    def test_repeated_auth_rejection_enters_bounded_failure_path(self):
+        self.runtime.journal.begin(CFG)
+        class Rejected:
+            status_code = 200
+            def json(self): return {'code': '302'}
+        self.runtime.engine.post = lambda *args, **kwargs: Rejected()
+        with self.assertRaises(OSError): self.runtime.submit(CFG['courses'][0], CFG)
+        self.assertIsNone(self.runtime.journal.snapshot()['pending'])
+
 
 class AuthSessionTests(unittest.TestCase):
     def test_existing_authentication_and_cookie_contract_without_network(self):

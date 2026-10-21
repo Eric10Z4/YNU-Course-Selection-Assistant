@@ -254,6 +254,8 @@ class Runtime:
         if code == '302':
             self.engine.invalidate_auth()
         self.journal.acknowledged(course['id'], code == '1')
+        if code == '302':
+            raise OSError('登录态持续失效，需要核对并限制重登次数')
         self.log(f"{course['name']}：{'已成功' if code == '1' else '本次未成功'}")
 
     def run(self, cfg):
