@@ -32,8 +32,8 @@ public final class DeviceTests {
         // Gradle may uninstall the tested app before adb can collect its data.
         // Keep only these synthetic reports in the test emulator's shell area.
         shell("mkdir -p /data/local/tmp/ynu-device-reports");
-        shell("echo "+android.util.Base64.encodeToString(text.getBytes("UTF-8"),android.util.Base64.NO_WRAP)+
-            " | base64 -d > /data/local/tmp/ynu-device-reports/"+name);
+        shell("cp "+new File(directory,name).getAbsolutePath()+" /data/local/tmp/ynu-device-reports/"+name);
+        assertEquals("Synthetic report retained outside test-app cleanup",text,shellOutput("cat /data/local/tmp/ynu-device-reports/"+name));
     }
     private MainActivity activity() {
         Intent intent=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -66,8 +66,14 @@ public final class DeviceTests {
         report("ocr.json",new JSONObject().put("passed",true).put("scope","synthetic blank/transparent inference; no recognition-rate claim").toString());
     }
     private void shell(String command) throws Exception {
+        shellOutput(command);
+    }
+    private String shellOutput(String command) throws Exception {
         try (InputStream stream=new ParcelFileDescriptor.AutoCloseInputStream(getInstrumentation().getUiAutomation().executeShellCommand(command))) {
-            byte[] buffer=new byte[1024]; while (stream.read(buffer)!=-1) { }
+            ByteArrayOutputStream output=new ByteArrayOutputStream();
+            byte[] buffer=new byte[1024]; int count;
+            while ((count=stream.read(buffer))!=-1) output.write(buffer,0,count);
+            return output.toString("UTF-8");
         }
     }
     private void waitNetwork(boolean available) throws Exception {
@@ -79,7 +85,7 @@ public final class DeviceTests {
         }
         fail("Native connectivity callback did not reach available="+available);
     }
-    @Test public void testNativeConnectivityDisconnectAndRestore() throws Exception {
+    @Test(timeout=120000) public void testNativeConnectivityDisconnectAndRestore() throws Exception {
         org.junit.Assume.assumeTrue("Only toggle test-emulator radios",Build.HARDWARE.equals("ranchu") || Build.HARDWARE.equals("goldfish"));
         try {
             shell("svc wifi disable"); shell("svc data disable"); waitNetwork(false);
