@@ -156,6 +156,47 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(OSError): gate.check_budget()
 
 
+class AuthSessionTests(unittest.TestCase):
+    def test_existing_authentication_and_cookie_contract_without_network(self):
+        try:
+            import requests
+            from requests.adapters import BaseAdapter
+        except ImportError:
+            self.skipTest('requests is supplied by the Android runtime/build')
+        from android_runtime import load_engine
+        class Ocr:
+            def classify(self, data): return 'synthetic-code'
+        class Adapter(BaseAdapter):
+            def __init__(self): self.selected_headers = None
+            def close(self): pass
+            def send(self, request, **kwargs):
+                response = requests.Response(); response.status_code = 200
+                response.request = request; response.url = request.url
+                if '/4/vcode.do' in request.url:
+                    data = {'data': {'token': 'synthetic-vtoken'}}
+                elif '/vcode/image.do' in request.url:
+                    response._content = b'synthetic-image'; return response
+                elif '/check/login.do' in request.url:
+                    data = {'code': '1', 'data': {'token': 'synthetic-session-token'}}
+                    response.cookies = requests.cookies.cookiejar_from_dict({'_WEU':'synthetic-weu','JSESSIONID':'synthetic-jsession'})
+                elif '/courseResult.do' in request.url:
+                    self.selected_headers = request.headers
+                    data = {'code':'1','dataList':[]}
+                else:
+                    raise AssertionError('Unexpected school operation in synthetic authentication')
+                response._content = json.dumps(data).encode(); return response
+        factory, _ = load_engine(Ocr())
+        engine = factory(lambda *_: None, lambda *_: None)
+        engine.gate = NetworkGate(); engine.gate.update({'available':True,'captive':False}); engine.gate.begin_operation()
+        engine.ensure_session(); adapter = Adapter(); engine.session.mount('https://', adapter)
+        selected, error = engine.query_selected(CFG)
+        self.assertIsNone(error); self.assertEqual(selected, [])
+        self.assertEqual(adapter.selected_headers['token'], 'synthetic-session-token')
+        self.assertIn('_WEU=synthetic-weu', adapter.selected_headers['Cookie'])
+        self.assertIn('JSESSIONID=synthetic-jsession', adapter.selected_headers['Cookie'])
+        with self.assertRaises(ValueError): engine.session.get('http://untrusted.invalid/')
+
+
 def run_device_tests():
     stream = io.StringIO()
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__]))

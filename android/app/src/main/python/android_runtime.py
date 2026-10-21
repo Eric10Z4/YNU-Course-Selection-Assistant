@@ -4,8 +4,6 @@ from pathlib import Path
 import re
 import threading
 import time
-import types
-import sys
 from collections import deque
 from urllib.parse import quote, urlsplit
 
@@ -23,7 +21,6 @@ class NativeOcr:
 def load_engine(native_ocr):
     # The desktop OCR wheel is not an Android dependency. Keep its public API,
     # and delegate preprocessing/inference to Android's ONNX Runtime instead.
-    sys.modules['lite_ocr'] = NativeOcr(native_ocr)
     import qiangke_web as desktop
     import requests
     from requests.adapters import HTTPAdapter
@@ -51,6 +48,9 @@ def load_engine(native_ocr):
     class Engine(desktop.GrabEngine):
         def build_session(self):
             return MobileSession(self.gate)
+
+        def get_ocr(self):
+            return NativeOcr(native_ocr)
 
     return Engine, desktop
 

@@ -13,6 +13,28 @@ android {
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
     buildFeatures { buildConfig true }
+    signingConfigs {
+        preview {
+            if (System.getenv('ANDROID_PREVIEW_KEYSTORE_FILE')) {
+                storeFile file(System.getenv('ANDROID_PREVIEW_KEYSTORE_FILE'))
+                storePassword System.getenv('ANDROID_PREVIEW_STORE_PASSWORD')
+                keyAlias 'ynu-preview'
+                keyPassword System.getenv('ANDROID_PREVIEW_STORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            if (System.getenv('ANDROID_PREVIEW_KEYSTORE_FILE')) signingConfig signingConfigs.preview
+        }
+        preview {
+            initWith release
+            debuggable false
+            minifyEnabled false
+            signingConfig System.getenv('ANDROID_PREVIEW_KEYSTORE_FILE') ? signingConfigs.preview : signingConfigs.debug
+            matchingFallbacks = ['release']
+        }
+    }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     sourceSets.main.assets.srcDir layout.buildDirectory.dir('generated/modelAssets')
 }

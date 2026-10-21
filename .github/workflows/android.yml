@@ -30,12 +30,18 @@ jobs:
         with:
           python-version: '3.13'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Configure authorized preview signing on main
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          ANDROID_PREVIEW_KEYSTORE_B64: ${{ secrets.ANDROID_PREVIEW_KEYSTORE_B64 }}
+          ANDROID_PREVIEW_STORE_PASSWORD: ${{ secrets.ANDROID_PREVIEW_STORE_PASSWORD }}
+        run: python android/prepare_signing.py
       - name: Run recovery scenarios and build both 64-bit ABIs
         run: |
           python -m unittest discover -s tests -v
           chmod +x android/gradlew
-          android/gradlew -p android assembleDebug assembleDebugAndroidTest lintDebug
-          python android/verify_apk.py --apk android/app/build/outputs/apk/debug/app-debug.apk --commit '${{ github.sha }}' --output android/app/build/outputs/apk/debug/build-manifest.json
+          android/gradlew -p android assembleDebug assemblePreview assembleDebugAndroidTest lintDebug
+          python android/verify_apk.py --apk android/app/build/outputs/apk/preview/app-preview.apk --commit '${{ github.sha }}' --output android/app/build/outputs/apk/preview/build-manifest.json
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -50,15 +56,11 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048
           script: |
+            mkdir -p reports/android-${{ matrix.api }}
+            trap 'adb pull /sdcard/Android/data/io.github.eric10z4.ynu.android/files/ reports/android-${{ matrix.api }}/device || true; timeout 20s adb logcat -d > reports/android-${{ matrix.api }}/emulator.log || true' EXIT
             adb shell wm size 720x1280
             adb shell wm density 320
             android/gradlew -p android connectedDebugAndroidTest
-      - name: Collect offline screenshots and logs
-        if: always()
-        run: |
-          mkdir -p reports/android-${{ matrix.api }}
-          adb pull /sdcard/Android/data/io.github.eric10z4.ynu.android/files/ reports/android-${{ matrix.api }}/device || true
-          adb logcat -d > reports/android-${{ matrix.api }}/emulator.log || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -72,6 +74,6 @@ jobs:
         with:
           name: YNU-android-preview
           path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/apk/debug/build-manifest.json
+            android/app/build/outputs/apk/preview/app-preview.apk
+            android/app/build/outputs/apk/preview/build-manifest.json
           if-no-files-found: error
