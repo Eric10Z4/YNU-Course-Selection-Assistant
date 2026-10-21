@@ -3,34 +3,18 @@
 轻量验证码 OCR —— 仅依赖 PIL + numpy + onnxruntime
 替代 ddddocr（85MB）+ opencv（112MB），模型仅 13MB
 """
-import os
 import json
 import numpy as np
 from PIL import Image
 import io
+from desktop_support import find_resource
 
-_dir = os.path.dirname(os.path.abspath(__file__))
 _charset = None
 _session = None
 
 
 def _res(name):
-    import sys
-    base = getattr(sys, "_MEIPASS", None)
-    if base:
-        p = os.path.join(base, name)
-        if os.path.exists(p):
-            return p
-    try:
-        p = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), name)
-        if os.path.exists(p):
-            return p
-    except Exception:
-        pass
-    p = os.path.join(_dir, name)
-    if os.path.exists(p):
-        return p
-    return name
+    return find_resource(name, __file__) or name
 
 
 def _load():

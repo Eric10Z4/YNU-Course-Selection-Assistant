@@ -2,13 +2,17 @@
 
 ## 当前 Windows V2.4
 
-`windows/` 已放齐一个入口 `qiangke_web.py`、`lite_ocr.py`、`ocr_model.onnx`、`ocr_charset.json`、图标、背景与 `build.py`。主源码与网盘 V2.4 文件逐字节相同；独立 OCR 模块从开发记录指向的旧打包目录找回。
+`windows/` 已放齐一个入口 `qiangke_web.py`、`lite_ocr.py`、`ocr_model.onnx`、`ocr_charset.json`、图标、背景与 `build.py`。最初导入时主源码与网盘 V2.4 文件逐字节相同；2026-10-21 起活动源码增加桌面平台适配，原始 V2.4 快照仍在 `archive/windows/source/qiangke_web V2.4.py`。独立 OCR 模块从开发记录指向的旧打包目录找回。
 
 在 Python 3.10+ 环境中安装 `windows/requirements.txt` 后运行入口。打包时先切换到 `windows/`，运行 `python build.py`。脚本创建独立的 `.build_venv`，安装 PyInstaller 等依赖，输出 `dist/QiangKeWeb.exe`；首次需要联网下载依赖。
 
 只保留一个 `qiangke_web*.py` 入口。原始脚本在发现多个入口时按文件修改时间选择，Git 检出后的文件时间不能可靠表示版本顺序。
 
 模型与字符表必须随程序分发；仅复制主程序会导致 OCR 缺失。模型数据由原始打包脚本加入成品，`lite_ocr.py` 会由 Python 模块依赖分析收集。
+
+## macOS
+
+独立入口和原生构建见 [macOS 指南](MACOS.md)。构建及验证在 macOS 环境运行，不调用 Windows 的 `build.py`。Windows 打包时新增的 `desktop_support.py` 由依赖分析收集。
 
 ## 历史版本
 

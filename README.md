@@ -34,6 +34,10 @@ python -m venv .venv
 
 桌面窗口需要系统可用的 WebView2 环境。需要自行打包时，在 `windows` 目录执行 `python build.py`；脚本会建立 `.build_venv` 并生成 `dist/QiangKeWeb.exe`。详见 [构建说明](docs/BUILD.md)。
 
+## macOS 验证版
+
+macOS 原生验证进行中，使用独立入口与构建流程；状态见 [当前验证记录](docs/progress/2026-10-21-macos.md)。源码运行、两种芯片架构的构建及测试包说明见 [macOS 指南](docs/MACOS.md)。测试包与正式签名、公证和真实业务验收分别记录。
+
 ## Linux 使用
 
 ```bash
@@ -50,6 +54,8 @@ python qiangke_cli.py batches
 
 ```text
 windows/           当前 V2.4 源码、找回的 OCR 模块、模型和构建资源
+macos/             macOS 入口、构建与离线/原生 GUI 验证
+tests/             桌面平台行为检查
 linux/             原始 Linux 压缩包解出的文件
 archive/windows/   各版原始源码与两套打包工具，保持字节内容不变
 archive/linux/     原始 Linux 压缩包
