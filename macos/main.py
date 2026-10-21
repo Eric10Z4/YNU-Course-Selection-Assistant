@@ -11,10 +11,12 @@ if source_dir.is_dir():
 
 import qiangke_web  # noqa: E402
 import verify_runtime  # noqa: E402
+from app_version import DISPLAY_VERSION  # noqa: E402
 
 
 def main():
     parser = argparse.ArgumentParser(description="YNU course assistant for macOS")
+    parser.add_argument("--version", action="version", version=DISPLAY_VERSION)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--self-test", action="store_true", help="offline resource/OCR/HTTP check")
     mode.add_argument("--gui-smoke-test", action="store_true", help="native WebView and local API check")

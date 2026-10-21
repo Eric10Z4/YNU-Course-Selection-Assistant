@@ -4,8 +4,10 @@ import argparse
 import json
 from pathlib import Path
 import platform
+import plistlib
 import subprocess
 import sys
+from app_version import BUNDLE_IDENTIFIER, bundle_metadata
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +19,7 @@ def build_command(architecture):
     command = [
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
         "--onedir", "--windowed", "--name", NAME,
-        "--osx-bundle-identifier", "io.github.eric10z4.ynu-course-selection-assistant",
+        "--osx-bundle-identifier", BUNDLE_IDENTIFIER,
         "--target-arch", architecture,
         "--distpath", str(ROOT / "dist" / "macos" / architecture),
         "--workpath", str(ROOT / "build" / "macos" / architecture),
@@ -55,6 +57,13 @@ def main():
     app = ROOT / "dist" / "macos" / args.arch / f"{NAME}.app"
     if not (app / "Contents" / "MacOS" / NAME).is_file():
         raise RuntimeError(f"Build did not produce {app}")
+    # The CLI emits a minimal 0.0.0 plist. Update it, then reseal the parent
+    # bundle; collected Mach-O files retain PyInstaller's ad-hoc signatures.
+    info_path = app / "Contents" / "Info.plist"
+    info = plistlib.loads(info_path.read_bytes())
+    info.update(bundle_metadata())
+    info_path.write_bytes(plistlib.dumps(info))
+    subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(app)], check=True)
     print(f"Built test application: {app}")
     return 0
 

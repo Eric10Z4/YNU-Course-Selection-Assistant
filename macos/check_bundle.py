@@ -7,6 +7,7 @@ import plistlib
 import subprocess
 import sys
 import tempfile
+from app_version import BUNDLE_IDENTIFIER, bundle_metadata
 
 
 def main():
@@ -24,6 +25,11 @@ def main():
         bundle = directory / "Application With Spaces.app"
         subprocess.run(["/usr/bin/ditto", str(args.app.resolve()), str(bundle)], check=True)
         info = plistlib.loads((bundle / "Contents" / "Info.plist").read_bytes())
+        if info.get("CFBundleIdentifier") != BUNDLE_IDENTIFIER:
+            raise RuntimeError("Unexpected bundle identifier")
+        for key, value in bundle_metadata().items():
+            if info.get(key) != value:
+                raise RuntimeError(f"Unexpected bundle metadata: {key}")
         executable = bundle / "Contents" / "MacOS" / info["CFBundleExecutable"]
         architecture = subprocess.check_output(["/usr/bin/lipo", "-archs", str(executable)], text=True).strip()
         if architecture != args.arch:
@@ -31,6 +37,7 @@ def main():
         subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(bundle)], check=True)
         (reports / "bundle.json").write_text(json.dumps({
             "architecture": architecture,
+            "metadata": bundle_metadata(),
             "ad_hoc_signature_verified": True,
             "copied_bundle_with_spaces": True,
             "developer_id_notarized": False,
