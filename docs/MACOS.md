@@ -43,6 +43,8 @@ python macos/check_bundle.py \
 
 ## CI 与测试包
 
+入口：[Mac 构建工作流](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/actions/workflows/macos.yml)。首次固定依赖后的完整结果见 [运行 #39572967451](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/actions/runs/39572967451)。
+
 `.github/workflows/macos.yml` 对相关路径的 PR、main 推送或手动触发运行，分别在 `macos-15` / `macos-15-intel` 上构建 arm64 / x86_64。成功后保存使用 ditto 打包的应用 ZIP；另存 JSON 报告、运行输出和实际依赖版本。请下载对应运行的 artifact，不能把其它提交或单一架构的结果套用到当前版本。
 
 构建使用隔离 runner；`constraints-arm64.txt` / `constraints-x86_64.txt` 保存首次原生验证通过的依赖组合，CI 同时约束版本并记录本次实际安装结果。它们是版本约束，不是带哈希的完整锁文件，不保证安装包逐字节复现。升级依赖需在对应架构重新验证。
