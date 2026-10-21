@@ -8,6 +8,7 @@ import android.graphics.Color;
 import android.os.*;
 import android.webkit.*;
 import android.view.*;
+import android.widget.FrameLayout;
 import org.json.JSONObject;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -21,6 +22,7 @@ public final class MainActivity extends Activity {
     public WebView webViewForTesting() { return web; }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); host = RuntimeHost.get(this);
+        if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         web = new WebView(this); web.setBackgroundColor(Color.rgb(245,247,251));
         web.getSettings().setJavaScriptEnabled(true);
@@ -44,7 +46,10 @@ public final class MainActivity extends Activity {
             }
         });
         web.addJavascriptInterface(new Bridge(), "YnuNative");
-        setContentView(web);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.rgb(245,247,251));
+        root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(root);
         if (Build.VERSION.SDK_INT >= 30) {
             web.post(() -> {
                 WindowInsetsController bars=getWindow().getInsetsController();
@@ -56,14 +61,14 @@ public final class MainActivity extends Activity {
             getWindow().setStatusBarColor(Color.rgb(245,247,251));
             getWindow().setNavigationBarColor(Color.rgb(245,247,251));
         }
-        web.setOnApplyWindowInsetsListener((view, insets) -> {
-            int left, top, right, bottom;
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets system = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
-                left=system.left; top=system.top; right=system.right; bottom=system.bottom;
-            } else { left=insets.getSystemWindowInsetLeft(); top=insets.getSystemWindowInsetTop(); right=insets.getSystemWindowInsetRight(); bottom=insets.getSystemWindowInsetBottom(); }
-            view.setPadding(left,top,right,bottom); return insets;
+                view.setPadding(system.left,system.top,system.right,system.bottom);
+            }
+            return insets;
         });
+        root.requestApplyInsets();
         web.loadUrl(ORIGIN + "/index.html");
     }
     private void result(String id, String value) {
