@@ -2,6 +2,8 @@
 
 当前版本：`2.4.1-preview.1`，预发布标签 `macos-v2.4.1-preview.1`。应用内的数字版本为 2.4.1，发布渠道单独记录。版本源为 `macos/app_version.py`。
 
+[预发布下载页](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases/tag/macos-v2.4.1-preview.1)；对应源码、构建环境和检查证据见 [发布记录](progress/2026-10-21-macos-release.md)。
+
 ## 当前可完成的发布
 
 无需本地 Mac 或 Apple 证书，也可以使用 GitHub 原生 Mac runner 构建、验证和生成 ad-hoc 签名测试包，再发布到 GitHub Releases 的 **Pre-release**。预发布不标记为 Latest，不替换原 Windows 稳定版，不声称已通过 Apple 公证或真人业务验收。

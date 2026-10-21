@@ -36,7 +36,7 @@ python -m venv .venv
 
 ## macOS 验证版
 
-首个预发布版准备：`2.4.1-preview.1`。下载渠道、发布流程和正式签名所需条件见 [Mac 发布指南](docs/MACOS_RELEASE.md)。
+首个 Mac 预发布版：[2.4.1 Preview 1 下载](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases/tag/macos-v2.4.1-preview.1)，提供 Apple Silicon 与 Intel 两份应用。当前为 ad-hoc 签名、未公证，下载后可能被 macOS 阻止打开；人工交互和真实学校业务仍待验收。发布流程和正式签名所需条件见 [Mac 发布指南](docs/MACOS_RELEASE.md)。
 
 Apple Silicon 与 Intel 的原生构建、离线 OCR 和原生窗口/API/SSE 自动检查已通过，人工交互和真实业务仍待验收；证据见 [当前验证记录](docs/progress/2026-10-21-macos.md)。源码运行、两种芯片架构的构建及测试包说明见 [macOS 指南](docs/MACOS.md)。测试包与正式签名、公证分别记录。
 

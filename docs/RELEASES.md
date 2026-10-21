@@ -1,6 +1,21 @@
 # 下载与文件校验
 
-成品原样归档，GitHub 下载文件名使用英文；原名称与 SHA-256 保存在 [文件清单](file-manifest.json)。
+## macOS 预发布
+
+[2.4.1 Preview 1 下载页](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases/tag/macos-v2.4.1-preview.1) 提供以下两份独立构建，无需安装 Python：
+
+| 芯片 | 应用压缩包 |
+| --- | --- |
+| Apple Silicon（M 系列） | `QiangKeWeb-2.4.1-macos-arm64.zip` |
+| Intel | `QiangKeWeb-2.4.1-macos-x86_64.zip` |
+
+下载页同时提供 `SHA256SUMS.txt`、`release-manifest.json` 和两份 `verification` 压缩包，记录源码提交、架构、依赖及实际自动检查结果。Mac 可运行 `shasum -a 256 <文件路径>` 核对对应校验值。
+
+这是 ad-hoc 签名、未公证的预发布版，尚未完成真人业务验收，仅在 macOS 15 的构建环境验证。下载后可能被 macOS 阻止打开；正式分发的条件和待验收内容见 [Mac 发布指南](MACOS_RELEASE.md)。本次不提供 APK 或 IPA。
+
+## 历史成品
+
+以下历史成品原样归档，GitHub 下载文件名使用英文；原名称与 SHA-256 保存在 [文件清单](file-manifest.json)。
 
 | 下载页 | 原文件名 | 大小 | 网盘修改时间 |
 | --- | --- | --- | --- |

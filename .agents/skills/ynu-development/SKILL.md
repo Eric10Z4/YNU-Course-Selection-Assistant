@@ -12,6 +12,7 @@ description: "维护 YNU-Course-Selection-Assistant 的桌面代码、平台适�
 - 平台范围/下一阶段：[改造计划](../../../docs/ROADMAP.md)。
 - 测试和真实设备验收：[验收矩阵](../../../docs/TEST_MATRIX.md)。
 - Mac 构建/排错：[Mac 指南](../../../docs/MACOS.md) 和 [首次验证记录](../../../docs/progress/2026-10-21-macos.md)。
+- Mac 预发布/正式分发：[发布指南](../../../docs/MACOS_RELEASE.md) 和 [预发布记录](../../../docs/progress/2026-10-21-macos-release.md)。
 
 检查当前分支、改动和用户授权。继续已有工作，不把计划当作实现结果，不重新要求用户确认已经授权的例行操作。
 
@@ -36,6 +37,8 @@ description: "维护 YNU-Course-Selection-Assistant 的桌面代码、平台适�
 ## 上传与交付
 
 使用现有 GitHub 权限在用户授权范围内提交上传，保留并发改动。构建产物放在 artifacts/Releases，不提交到 Git；签名和正式发布按本次任务范围执行。
+
+Mac 预发布通过发布工作流核对成功的 main 原生构建、提交、两种架构的报告和下载校验值，不能直接把 PR 构建改称主分支成品。已经存在的版本标签或发布不覆盖；ad-hoc 预发布与 Developer ID 签名、公证和人工验收分别记录。
 
 读取与本次提交匹配的 CI 作业和 JSON 报告，报告实际架构、检查结果及构建链接。把以下状态分开：代码实现、自动检查、原生构建、原生启动、人工交互、真实学校业务和正式分发。上一提交的通过结果只有在相关代码未变时才能作为继承证据，并注明原提交。
 
