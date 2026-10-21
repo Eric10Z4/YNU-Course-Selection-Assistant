@@ -27,7 +27,8 @@ public final class RuntimeHost {
                 if (!Python.isStarted()) Python.start(new AndroidPlatform(context));
                 PyObject initialized = Python.getInstance().getModule("android_runtime");
                 initialized.callAttr("initialize", context.getFilesDir().getAbsolutePath(), ocr);
-                initialized.callAttr("network", network); module = initialized;
+                module = initialized;
+                control.execute(() -> initialized.callAttr("network", network));
             } catch (Exception e) {
                 android.util.Log.e("YNU", "Engine initialization failed", e);
                 initializationError = "移动端引擎初始化失败，请反馈应用版本和设备型号";
