@@ -1,5 +1,11 @@
 # 验证记录
 
+## 2026-10-25 安卓预览验证
+
+main 提交 `8af69ea0571e1f9d49143c930c6a350c8eff80b8` 的 [原生运行](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/actions/runs/40166135205) 完成 API 26、35、36 的 x86_64 模拟器检查：每个 API 11 项原生设备检查，以及非调试公开预览包的全新安装、WebView 到 Python 空闲状态验证。51 项单元测试通过，其中 31 项安卓合成场景；学校交互均为合成响应。
+
+公开预览采用固定专用证书，APK、来源、16 KB 对齐与下载校验记录见 [安卓发布记录](progress/2026-10-25-android-release.md) 和 [下载说明](RELEASES.md)。ARM64 实体设备、真实学校业务、长期锁屏/Doze、厂商后台策略与保留数据覆盖更新仍待验收；iOS 尚未实现。以下为各历史阶段当时的记录。
+
 ## 2026-10-21 跨平台开发基础
 
 Mac Apple Silicon / Intel 的原生构建、离线 OCR、本机服务及原生 WebView/API/SSE 自动检查已通过。具体提交、环境、CI 链接和待人工验收项见 [阶段记录](progress/2026-10-21-macos.md)。这不表示真实学校业务、正式签名公证或安卓/iOS 已验证。
