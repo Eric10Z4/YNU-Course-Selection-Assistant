@@ -19,12 +19,13 @@ public final class TaskService extends Service {
         @Override public void run() {
             RuntimeHost host = RuntimeHost.get(TaskService.this);
             host.control.execute(() -> {
+                long revision = host.startRevision();
                 JSONObject snapshot = host.snapshot();
                 handler.post(() -> {
                     if (destroyed) return;
-                    if (snapshot != null && !snapshot.optBoolean("active") && SystemClock.elapsedRealtime() - started > 15000) { stopSelf(); return; }
+                    if (snapshot != null && !snapshot.optBoolean("active") && host.canRetire(revision) && SystemClock.elapsedRealtime() - started > 15000) { stopSelf(); return; }
                     if (SystemClock.elapsedRealtime() - started > 3 * 60 * 60 * 1000L) { host.stop("后台服务运行时长已到，请手动恢复"); stopSelf(); return; }
-                    getSystemService(NotificationManager.class).notify(7, notification(snapshot == null ? "引擎准备中" : snapshot.optString("message")));
+                    getSystemService(NotificationManager.class).notify(7, notification(host.hasPendingStart() ? "等待当前查询完成后启动" : snapshot == null ? "引擎准备中" : snapshot.optString("message")));
                     String state = snapshot == null ? "" : snapshot.optString("state");
                     boolean executing = Arrays.asList("running", "submitting", "reconciling", "waiting_start").contains(state);
                     if (wakeLock != null && executing) wakeLock.acquire(120000L);
@@ -44,7 +45,7 @@ public final class TaskService extends Service {
     @Override public void onCreate() {
         instance = this;
         super.onCreate(); started = SystemClock.elapsedRealtime();
-        generation = RuntimeHost.get(this).serviceGeneration;
+        generation = RuntimeHost.get(this).newServiceGeneration();
         NotificationManager manager = getSystemService(NotificationManager.class);
         manager.createNotificationChannel(new NotificationChannel("tasks", "选课任务", NotificationManager.IMPORTANCE_LOW));
         if (Build.VERSION.SDK_INT >= 29) startForeground(7, notification("正在准备任务"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
@@ -54,7 +55,6 @@ public final class TaskService extends Service {
         handler.post(heartbeat);
     }
     @Override public int onStartCommand(Intent intent, int flags, int id) {
-        generation = RuntimeHost.get(this).serviceGeneration;
         if (intent != null && STOP.equals(intent.getAction())) { RuntimeHost.get(this).stop("用户从通知栏停止任务"); stopSelf(); }
         return START_NOT_STICKY;
     }

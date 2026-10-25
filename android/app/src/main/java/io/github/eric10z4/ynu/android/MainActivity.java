@@ -78,29 +78,36 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void request(String id, String method, String payload) {
             if (id.length() > 80 || payload.length() > 200000) return;
             if (!Arrays.asList("snapshot","load_config","save_config","batches","types","query","selected","timetable","start","resume","stop","withdraw","recheck","confirm_review").contains(method)) return;
+            if (method.equals("stop")) host.cancelOperations();
+            long operation = host.operationGeneration();
             Runnable action = () -> {
                 try {
                     if (method.equals("load_config")) result(id, new JSONObject().put("ok",true).put("cfg",new JSONObject(host.vault.load())).toString());
                     else if (method.equals("save_config")) { host.vault.save(new JSONObject(payload).getJSONObject("cfg").toString()); result(id,"{\"ok\":true}"); }
                     else {
-                        String response = host.call(method, payload);
+                        String response = method.equals("withdraw") ? host.withdraw(operation, payload) : host.call(method, payload);
                         result(id, response);
-                        if ((method.equals("start") || method.equals("resume")) && !new JSONObject(response).optBoolean("ok")) {
-                            JSONObject current = host.snapshot();
-                            if (current == null || !current.optBoolean("active")) stopService(new Intent(MainActivity.this, TaskService.class));
-                        }
                     }
                 } catch (Exception e) { result(id, "{\"ok\":false,\"msg\":\"操作未完成，请核对任务状态\"}"); }
             };
             if (method.equals("start") || method.equals("resume")) {
+                long token = host.reserveStart();
                 runOnUiThread(() -> {
-                    if (!visible) { result(id,"{\"ok\":false,\"msg\":\"请回到应用前台启动任务\"}"); return; }
+                    if (!host.isPendingStart(token)) { result(id,"{\"ok\":false,\"msg\":\"启动已取消，请手动重新开始\"}"); return; }
+                    if (!visible) { host.cancelStart(token); result(id,"{\"ok\":false,\"msg\":\"请回到应用前台启动任务\"}"); return; }
                     if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                         requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+                        host.cancelStart(token);
                         result(id,"{\"ok\":false,\"msg\":\"请允许任务通知后，再点击开始\"}"); return;
                     }
-                    try { host.serviceGeneration++; startForegroundService(new Intent(MainActivity.this, TaskService.class)); host.actions.execute(action); }
-                    catch (Exception e) { result(id,"{\"ok\":false,\"msg\":\"系统未允许后台服务，请保持前台后重试\"}"); }
+                    try {
+                        startForegroundService(new Intent(MainActivity.this, TaskService.class));
+                        host.actions.execute(() -> {
+                            try { result(id, host.start(token, method, payload)); }
+                            catch (Exception e) { host.cancelStart(token); result(id,"{\"ok\":false,\"msg\":\"启动未完成，请核对任务状态\"}"); }
+                        });
+                    }
+                    catch (Exception e) { host.cancelStart(token); result(id,"{\"ok\":false,\"msg\":\"系统未允许后台服务，请保持前台后重试\"}"); }
                 });
             } else if (method.equals("snapshot") || method.equals("stop")) host.control.execute(action);
             else host.actions.execute(action);

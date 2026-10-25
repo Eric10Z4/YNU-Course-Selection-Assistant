@@ -81,10 +81,11 @@ class Journal:
                 'id': course['id'], 'batch': course.get('batch') or self.data['config'].get('batch'),
                 'operation': operation, 'at': time.time()})
 
-    def acknowledged(self, course_id, success):
+    def acknowledged(self, course_id, success, batch):
         with self.lock:
             for course in self.data['courses']:
-                if course['id'] == course_id:
+                course_batch = course.get('batch') or self.data['config']['batch']
+                if str(course['id']) == str(course_id) and str(course_batch) == str(batch):
                     course['state'] = 'succeeded' if success else 'queued'
             state = self.data['state']
             stopped = state in {'stopped', 'interrupted', 'expired'}

@@ -18,6 +18,8 @@ def verify(path, commit, output):
     abis = set()
     def inspect(archive, prefix=''):
         for name in archive.namelist():
+            if Path(name).name in {'test_android.py', 'test_android.pyc'}:
+                raise ValueError('Public preview contains synthetic debug fixtures')
             if name.endswith(('.imy', '.zip')):
                 nested = io.BytesIO(archive.read(name))
                 if zipfile.is_zipfile(nested):
@@ -45,7 +47,7 @@ def verify(path, commit, output):
             raise ValueError(f'Unexpected ABI coverage: {abis}')
     tools = Path(os.environ['ANDROID_HOME']) / 'build-tools/35.0.0'
     badging = subprocess.check_output([str(tools / 'aapt'), 'dump', 'badging', str(path)], text=True)
-    for required in ("versionCode='1'", "versionName='0.1.0-preview.1'", "sdkVersion:'26'", "targetSdkVersion:'36'"):
+    for required in ("package: name='io.github.eric10z4.ynu.android'", "versionCode='1'", "versionName='0.1.0-preview.1'", "sdkVersion:'26'", "targetSdkVersion:'36'"):
         if required not in badging:
             raise ValueError(f'Wrong Android application metadata: {required}')
     if 'application-debuggable' in badging:
@@ -60,7 +62,7 @@ def verify(path, commit, output):
               'min_sdk': 26, 'target_sdk': 36, 'abis': sorted(abis), 'elf_16kb_alignment': 'passed',
               'native_libraries': libraries, 'filename': path.name, 'size': path.stat().st_size,
               'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'school_business_acceptance': 'pending'}
-    record.update(debuggable=False, zip_16kb_alignment='passed', certificate_sha256=certificate,
+    record.update(debuggable=False, debug_fixtures='excluded', zip_16kb_alignment='passed', certificate_sha256=certificate,
                   signing='dedicated-preview' if stable else 'ephemeral-ci-test')
     output.write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
     print(f'Verified native ABI/alignment: {len(libraries)} libraries')

@@ -28,6 +28,8 @@ local.properties
 *.aab
 *.jks
 *.keystore
+*.p12
+*.pfx
 
 # 编辑器 / 系统
 .idea/

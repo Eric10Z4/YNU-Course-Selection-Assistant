@@ -196,6 +196,14 @@ class Runtime:
             self.gate.condition.notify_all()
         return {'ok': True}
 
+    def prepare_withdraw(self):
+        with self.guard:
+            if self.worker and self.worker.is_alive():
+                return False
+            self.stop_event.clear()
+            self.engine.stop_flag.clear()
+            return True
+
     def transition(self, state, message):
         with self.guard:
             if self.stop_event.is_set():
@@ -234,7 +242,14 @@ class Runtime:
                 self.engine.stop()
                 self.journal.set('expired', '本次运行时间已到，未再发送提交')
                 return
+            start_at = float(cfg.get('start_at_ms') or 0) / 1000
+            if start_at and not self.execution_started and time.time() - start_at > 120:
+                self.stop_event.set()
+                self.engine.stop()
+                self.journal.set('expired', '错过计划时间超过两分钟，请重新设置后手动开始')
+                return
             self.journal.pending(course)  # Durable before the first mutating byte.
+            self.execution_started = True
         body = {'data': {'operationType': '1', 'studentCode': cfg['username'],
                         'electiveBatchCode': course.get('batch') or cfg['batch'],
                         'teachingClassId': course['id'], 'isMajor': '1',
@@ -253,7 +268,7 @@ class Runtime:
         code = str(result['code'])
         if code == '302':
             self.engine.invalidate_auth()
-        self.journal.acknowledged(course['id'], code == '1')
+        self.journal.acknowledged(course['id'], code == '1', course.get('batch') or cfg['batch'])
         if code == '302':
             raise OSError('登录态持续失效，需要核对并限制重登次数')
         self.log(f"{course['name']}：{'已成功' if code == '1' else '本次未成功'}")
@@ -295,7 +310,6 @@ class Runtime:
                             self.transition('completed', '全部目标课程已确认选上')
                             return
                         if not self.transition('running', '正在执行；提交异常时先核对'): return
-                        self.execution_started = True
                         self.submit(courses[cursor % len(courses)], cfg)
                         cursor += 1
                         failures = 0
@@ -366,11 +380,18 @@ class Runtime:
                     raise ValueError('先处理上次待核对提交')
                 if not cfg.get('batch') or not extra.get('id'):
                     raise ValueError('退选需要批次与教学班 ID')
+                with self.guard:
+                    if self.stop_event.is_set():
+                        return {'ok': False, 'msg': self.journal.snapshot()['message']}
                 self.engine.ensure_session()
-                if not self.engine.ensure_login(cfg['username'], cfg['password']):
-                    raise ValueError('登录失败')
-                self.journal.set('stopped', '准备退选', config=public_config(cfg), courses=[])
-                self.journal.pending({'id': str(extra['id']), 'batch': cfg['batch']}, 'withdraw')
+                logged_in = self.engine.ensure_login(cfg['username'], cfg['password'])
+                with self.guard:
+                    if self.stop_event.is_set():
+                        return {'ok': False, 'msg': self.journal.snapshot()['message']}
+                    if not logged_in:
+                        raise ValueError('登录失败')
+                    self.journal.set('stopped', '准备退选', config=public_config(cfg), courses=[])
+                    self.journal.pending({'id': str(extra['id']), 'batch': cfg['batch']}, 'withdraw')
                 from urllib.parse import urlencode
                 param = {'data': {'operationType': '2', 'studentCode': cfg['username'],
                                  'electiveBatchCode': cfg['batch'], 'teachingClassId': str(extra['id']), 'isMajor': '1'}}
@@ -423,6 +444,10 @@ def call(method, payload='{}'):
 
 def network(value):
     _runtime.network(json.loads(value))
+
+
+def prepare_withdraw():
+    return bool(_runtime and _runtime.prepare_withdraw())
 
 
 def stop(message):

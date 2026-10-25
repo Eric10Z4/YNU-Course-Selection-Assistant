@@ -180,6 +180,158 @@ public final class DeviceTests {
             assertEquals("stopped",host.snapshot().getString("state"));
         } finally { getInstrumentation().runOnMainSync(activity::finish); }
     }
+    private void stopSyntheticService() throws Exception {
+        host.stop("合成测试清理");
+        getInstrumentation().runOnMainSync(()->context.stopService(new Intent(context,TaskService.class)));
+        long until=SystemClock.elapsedRealtime()+5000;
+        while (TaskService.instance!=null && SystemClock.elapsedRealtime()<until) Thread.sleep(50);
+        assertNull("Previous synthetic service stopped",TaskService.instance);
+        host.control.submit(()->{}).get(5,TimeUnit.SECONDS);
+    }
+    @Test(timeout=90000) public void testPendingStartSurvivesHeartbeatAndHonorsStop() throws Exception {
+        stopSyntheticService();
+        host.actions.submit(()->{}).get(10,TimeUnit.SECONDS);
+        if (Build.VERSION.SDK_INT>=33) shell("pm grant "+context.getPackageName()+" android.permission.POST_NOTIFICATIONS");
+        MainActivity activity=activity();
+        CountDownLatch blocked=new CountDownLatch(1), release=new CountDownLatch(1);
+        Future<?> blocker=null;
+        try {
+            waitPage(activity);
+            String payload=Python.getInstance().getModule("test_android").callAttr("install_offline_scenario").toString();
+            blocker=host.actions.submit(()->{
+                blocked.countDown();
+                try { if (!release.await(70,TimeUnit.SECONDS)) throw new AssertionError("Blocked action timed out"); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new AssertionError(e); }
+            });
+            assertTrue("Synthetic action occupies the serial queue",blocked.await(5,TimeUnit.SECONDS));
+            MainActivity.Bridge bridge=activity.new Bridge();
+            bridge.request("pending-start","start",payload);
+            long until=SystemClock.elapsedRealtime()+10000;
+            while (TaskService.instance==null && SystemClock.elapsedRealtime()<until) Thread.sleep(50);
+            TaskService service=TaskService.instance;
+            assertNotNull("Foreground service created for pending start",service);
+            assertTrue("Start remains queued",host.hasPendingStart());
+            assertFalse("Blocked start has not executed",host.snapshot().getBoolean("active"));
+            // Cross the real 30-second heartbeat, including its inactive grace period.
+            Thread.sleep(32000);
+            getInstrumentation().waitForIdleSync();
+            host.control.submit(()->{}).get(5,TimeUnit.SECONDS);
+            assertSame("Pending start keeps its foreground service",service,TaskService.instance);
+            assertTrue("Heartbeat preserves the queued start",host.hasPendingStart());
+            bridge.request("pending-stop","stop","{}");
+            host.control.submit(()->{}).get(5,TimeUnit.SECONDS);
+            assertFalse("Stop invalidates the pending start",host.hasPendingStart());
+            release.countDown();
+            blocker.get(5,TimeUnit.SECONDS);
+            host.actions.submit(()->{}).get(10,TimeUnit.SECONDS);
+            host.control.submit(()->{}).get(5,TimeUnit.SECONDS);
+            assertFalse("Canceled queued start never becomes active",host.snapshot().getBoolean("active"));
+            assertEquals("stopped",host.snapshot().getString("state"));
+            bridge.request("explicit-retry-start","start",payload);
+            until=SystemClock.elapsedRealtime()+10000;
+            while (!host.snapshot().optBoolean("active") && SystemClock.elapsedRealtime()<until) Thread.sleep(50);
+            assertTrue("A new explicit start still becomes active",host.snapshot().getBoolean("active"));
+            host.control.submit(()->{}).get(5,TimeUnit.SECONDS);
+            assertNotNull("Explicit retry has its foreground service",TaskService.instance);
+            assertFalse("Successful explicit retry clears its pending token",host.hasPendingStart());
+            getInstrumentation().runOnMainSync(()->context.startService(new Intent(context,TaskService.class).setAction(TaskService.STOP)));
+            until=SystemClock.elapsedRealtime()+5000;
+            while (host.snapshot().optBoolean("active") && SystemClock.elapsedRealtime()<until) Thread.sleep(50);
+            assertFalse("Notification stop ends explicit retry",host.snapshot().getBoolean("active"));
+            assertEquals("stopped",host.snapshot().getString("state"));
+            report("pending-start.json",new JSONObject().put("heartbeat_wait_ms",32000).put("pending_service_retained",true).put("stop_cancels_queued_start",true).put("explicit_retry_starts",true).put("retry_notification_stop",true).toString());
+        } finally {
+            release.countDown();
+            try {
+                if (blocker!=null) blocker.get(5,TimeUnit.SECONDS);
+                host.actions.submit(()->{}).get(10,TimeUnit.SECONDS);
+            } finally {
+                try { stopSyntheticService(); }
+                finally { getInstrumentation().runOnMainSync(activity::finish); }
+            }
+        }
+    }
+    @Test(timeout=30000) public void testStopBeforeStartUiDispatchCancelsStart() throws Exception {
+        stopSyntheticService();
+        host.actions.submit(()->{}).get(10,TimeUnit.SECONDS);
+        if (Build.VERSION.SDK_INT>=33) shell("pm grant "+context.getPackageName()+" android.permission.POST_NOTIFICATIONS");
+        MainActivity activity=activity();
+        CountDownLatch blocked=new CountDownLatch(1), release=new CountDownLatch(1);
+        try {
+            waitPage(activity);
+            String payload=Python.getInstance().getModule("test_android").callAttr("install_offline_scenario").toString();
+            new Handler(Looper.getMainLooper()).post(()->{
+                blocked.countDown();
+                try { release.await(5,TimeUnit.SECONDS); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            });
+            assertTrue("Main UI dispatch is paused",blocked.await(2,TimeUnit.SECONDS));
+            MainActivity.Bridge bridge=activity.new Bridge();
+            bridge.request("ui-pending-start","start",payload);
+            assertTrue("Start reserves its token before UI dispatch",host.hasPendingStart());
+            bridge.request("ui-pending-stop","stop","{}");
+            assertFalse("Later stop cancels before UI dispatch",host.hasPendingStart());
+            release.countDown();
+            getInstrumentation().waitForIdleSync();
+            host.actions.submit(()->{}).get(5,TimeUnit.SECONDS);
+            host.control.submit(()->{}).get(5,TimeUnit.SECONDS);
+            assertFalse("Canceled UI start leaves no pending token",host.hasPendingStart());
+            assertFalse("Canceled UI start never becomes active",host.snapshot().getBoolean("active"));
+            assertEquals("stopped",host.snapshot().getString("state"));
+            assertNull("Canceled UI start creates no foreground service",TaskService.instance);
+            report("pending-ui-dispatch.json",new JSONObject().put("stop_before_ui_dispatch",true).put("no_late_start",true).toString());
+        } finally {
+            release.countDown();
+            try {
+                getInstrumentation().waitForIdleSync();
+                host.actions.submit(()->{}).get(5,TimeUnit.SECONDS);
+            } finally {
+                try { stopSyntheticService(); }
+                finally { getInstrumentation().runOnMainSync(activity::finish); }
+            }
+        }
+    }
+    @Test(timeout=30000) public void testStopCancelsQueuedWithdrawal() throws Exception {
+        stopSyntheticService();
+        host.actions.submit(()->{}).get(10,TimeUnit.SECONDS);
+        MainActivity activity=activity();
+        CountDownLatch blocked=new CountDownLatch(1), release=new CountDownLatch(1);
+        Future<?> blocker=null;
+        try {
+            waitPage(activity);
+            com.chaquo.python.PyObject runtimeModule=Python.getInstance().getModule("android_runtime");
+            String initial=Python.getInstance().getModule("test_android").callAttr("install_offline_scenario").toString();
+            runtimeModule.get("_runtime").callAttr("network",Python.getInstance().getModule("json").callAttr("loads","{\"available\":true,\"captive\":false,\"validated\":true,\"identity\":\"synthetic\"}"));
+            String payload=new JSONObject(initial).put("extra",new JSONObject().put("id","class-a")).toString();
+            blocker=host.actions.submit(()->{
+                blocked.countDown();
+                try { if (!release.await(15,TimeUnit.SECONDS)) throw new AssertionError("Blocked withdrawal timed out"); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new AssertionError(e); }
+            });
+            assertTrue("Synthetic action occupies the withdrawal queue",blocked.await(5,TimeUnit.SECONDS));
+            MainActivity.Bridge bridge=activity.new Bridge();
+            bridge.request("queued-withdraw","withdraw",payload);
+            bridge.request("queued-withdraw-stop","stop","{}");
+            host.control.submit(()->{}).get(5,TimeUnit.SECONDS);
+            release.countDown();
+            blocker.get(5,TimeUnit.SECONDS);
+            host.actions.submit(()->{}).get(5,TimeUnit.SECONDS);
+            host.control.submit(()->{}).get(5,TimeUnit.SECONDS);
+            assertEquals("Stopped queued withdrawal sends no mutation",0,runtimeModule.get("_runtime").get("engine").get("withdrawals").toInt());
+            assertFalse("Stopped queued withdrawal leaves no active task",host.snapshot().getBoolean("active"));
+            assertEquals("stopped",host.snapshot().getString("state"));
+            report("pending-withdrawal.json",new JSONObject().put("stop_cancels_queued_withdrawal",true).put("synthetic_withdrawals",0).toString());
+        } finally {
+            release.countDown();
+            try {
+                if (blocker!=null) blocker.get(5,TimeUnit.SECONDS);
+                host.actions.submit(()->{}).get(5,TimeUnit.SECONDS);
+            } finally {
+                try { stopSyntheticService(); }
+                finally { getInstrumentation().runOnMainSync(activity::finish); }
+            }
+        }
+    }
     @Test public void testSystemTimeoutCallbackStopsService() throws Exception {
         if (Build.VERSION.SDK_INT<35) return;
         MainActivity activity=startSyntheticService();

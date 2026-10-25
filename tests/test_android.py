@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 if not hasattr(sys, 'getandroidapilevel'):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'android/app/src/main/python'))
@@ -28,6 +29,7 @@ class FakeEngine:
         self.session = self
         self.selected = set()
         self.submissions = 0
+        self.withdrawals = 0
         self.queries = 0
         self.lose_response = False
     def close(self): pass
@@ -44,6 +46,9 @@ class FakeEngine:
         self.submissions += 1
         if self.lose_response: raise OSError('synthetic response lost')
         self.selected.add('class-a')
+        return Response()
+    def get(self, *args, **kwargs):
+        self.withdrawals += 1
         return Response()
 
 
@@ -81,8 +86,25 @@ class JournalTests(unittest.TestCase):
 
     def test_stopped_task_is_still_stopped_after_late_success(self):
         self.journal.pending(CFG['courses'][0]); self.journal.stop()
-        self.journal.acknowledged('class-a', True)
+        self.journal.acknowledged('class-a', True, 'batch-a')
         self.assertEqual(Journal(self.path).snapshot()['state'], 'stopped')
+
+    def test_success_acknowledgement_does_not_skip_another_batch(self):
+        courses = [CFG['courses'][0], dict(CFG['courses'][0], batch='batch-b')]
+        self.journal.begin(dict(CFG, courses=courses))
+        self.journal.pending(courses[0])
+        self.journal.acknowledged('class-a', True, 'batch-a')
+        self.assertEqual([c['state'] for c in self.journal.snapshot()['courses']],
+                         ['succeeded', 'queued'])
+
+    def test_failure_acknowledgement_does_not_requeue_another_batch(self):
+        courses = [CFG['courses'][0], dict(CFG['courses'][0], batch='batch-b')]
+        self.journal.begin(dict(CFG, courses=courses))
+        self.journal.reconcile({'batch-a': {'class-a'}, 'batch-b': set()})
+        self.journal.pending(courses[1])
+        self.journal.acknowledged('class-a', False, 'batch-b')
+        self.assertEqual([c['state'] for c in self.journal.snapshot()['courses']],
+                         ['succeeded', 'queued'])
 
     def test_resume_rejects_different_account_or_course_batch(self):
         for changed in (dict(CFG, username='other'), dict(CFG, batch='other')):
@@ -177,6 +199,112 @@ class RuntimeTests(unittest.TestCase):
         self.runtime.submit(CFG['courses'][0], CFG)
         self.assertEqual(self.runtime.engine.submissions, 0)
         self.assertEqual(self.runtime.snapshot()['state'], 'expired')
+
+    def test_submit_acknowledges_the_effective_course_batch(self):
+        courses = [CFG['courses'][0], dict(CFG['courses'][0], batch='batch-b')]
+        self.runtime.journal.begin(dict(CFG, courses=courses))
+        self.runtime.submit(courses[1], CFG)
+        self.assertEqual([c['state'] for c in self.runtime.snapshot()['courses']],
+                         ['queued', 'succeeded'])
+
+    def test_schedule_expiring_during_reconciliation_does_not_submit(self):
+        clock = [1000.0]
+        cfg = dict(CFG, start_at_ms=(clock[0] - 110) * 1000)
+        query = self.runtime.engine.query_selected
+        def delayed_query(value):
+            clock[0] += 20
+            return query(value)
+        self.runtime.engine.query_selected = delayed_query
+        with patch('android_runtime.time.time', side_effect=lambda: clock[0]):
+            self.runtime.start(cfg)
+            self.runtime.worker.join(2)
+            self.assertFalse(self.runtime.worker.is_alive())
+        self.assertEqual(self.runtime.engine.submissions, 0)
+        self.assertIsNone(self.runtime.snapshot()['pending'])
+        self.assertEqual(self.runtime.snapshot()['state'], 'expired')
+
+    def test_schedule_expiring_during_login_does_not_submit(self):
+        clock = [1000.0]
+        cfg = dict(CFG, start_at_ms=(clock[0] - 110) * 1000)
+        self.runtime.journal.begin(cfg)
+        def delayed_login(*_):
+            clock[0] += 20
+            return True
+        self.runtime.engine.ensure_login = delayed_login
+        with patch('android_runtime.time.time', side_effect=lambda: clock[0]):
+            self.runtime.submit(cfg['courses'][0], cfg)
+        self.assertEqual(self.runtime.engine.submissions, 0)
+        self.assertIsNone(self.runtime.snapshot()['pending'])
+        self.assertEqual(self.runtime.snapshot()['state'], 'expired')
+
+    def test_started_task_can_continue_after_initial_schedule_window(self):
+        clock = [1000.0]
+        courses = [CFG['courses'][0], dict(CFG['courses'][0], id='class-b')]
+        cfg = dict(CFG, courses=courses, start_at_ms=clock[0] * 1000, duration_minutes=5)
+        self.runtime.journal.begin(cfg)
+        with patch('android_runtime.time.time', side_effect=lambda: clock[0]):
+            self.runtime.submit(courses[0], cfg)
+            clock[0] += 130
+            self.runtime.submit(courses[1], cfg)
+        self.assertEqual(self.runtime.engine.submissions, 2)
+        self.assertEqual([c['state'] for c in self.runtime.snapshot()['courses']],
+                         ['succeeded', 'succeeded'])
+
+    def test_stop_during_withdrawal_login_prevents_the_get_submission(self):
+        entered, release = threading.Event(), threading.Event()
+        result, errors = {}, []
+        def delayed_login(*_):
+            entered.set()
+            release.wait(2)
+            return True
+        def withdraw():
+            try:
+                result.update(self.runtime.command('withdraw', CFG, {'id': 'class-a'}))
+            except Exception as exc:
+                errors.append(exc)
+        self.runtime.engine.ensure_login = delayed_login
+        worker = threading.Thread(target=withdraw)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(2))
+            self.runtime.stop('synthetic stop during login')
+        finally:
+            release.set()
+            worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertFalse(result['ok'])
+        self.assertEqual(self.runtime.engine.withdrawals, 0)
+        self.assertEqual(self.runtime.snapshot()['state'], 'stopped')
+        self.assertIsNone(self.runtime.snapshot()['pending'])
+
+    def test_new_explicit_withdrawal_is_allowed_after_an_earlier_stop(self):
+        self.runtime.stop()
+        self.assertTrue(self.runtime.prepare_withdraw())
+        self.assertTrue(self.runtime.command('withdraw', CFG, {'id': 'class-a'})['ok'])
+        self.assertEqual(self.runtime.engine.withdrawals, 1)
+        self.assertIsNone(self.runtime.snapshot()['pending'])
+
+    def test_stop_after_withdrawal_preparation_prevents_submission(self):
+        self.assertTrue(self.runtime.prepare_withdraw())
+        self.runtime.stop('synthetic stop after preparation')
+        self.assertFalse(self.runtime.command('withdraw', CFG, {'id': 'class-a'})['ok'])
+        self.assertEqual(self.runtime.engine.withdrawals, 0)
+        self.assertEqual(self.runtime.snapshot()['state'], 'stopped')
+        self.assertIsNone(self.runtime.snapshot()['pending'])
+
+    def test_withdrawal_preparation_cannot_clear_a_live_workers_stop(self):
+        self.runtime.network({'available': False, 'captive': False})
+        self.runtime.start(CFG)
+        # Hold the worker's final state transition so it remains alive during prepare.
+        with self.runtime.guard:
+            self.runtime.stop_event.set()
+            self.runtime.engine.stop_flag.set()
+            self.assertFalse(self.runtime.prepare_withdraw())
+            self.assertTrue(self.runtime.stop_event.is_set())
+            self.assertTrue(self.runtime.engine.stop_flag.is_set())
+        self.runtime.worker.join(2)
+        self.assertFalse(self.runtime.worker.is_alive())
 
     def test_repeated_auth_rejection_enters_bounded_failure_path(self):
         self.runtime.journal.begin(CFG)
