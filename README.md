@@ -1,10 +1,10 @@
 # YNU选课助手
 
-云南大学选课辅助工具，提供 **Windows 图形界面**与 **Linux 命令行版本**。
+云南大学选课辅助工具，提供 **Windows 桌面版、macOS 预览版和安卓预览版**，并保留 Linux 命令行存档。
 
-[下载 Windows V2.4](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases/tag/v2.4) · [所有版本](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases) · [更新日志](CHANGELOG.md) · [历史与时间来源](docs/HISTORY.md)
+[下载安卓 0.1.0 Preview 1](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases/tag/android-v0.1.0-preview.1) · [下载 Windows V2.4](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases/tag/v2.4) · [所有版本](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases) · [更新日志](CHANGELOG.md) · [历史与时间来源](docs/HISTORY.md)
 
-跨平台开发：[开发流程](docs/DEVELOPMENT.md) · [macOS / 安卓 / iOS 改造计划](docs/ROADMAP.md) · [验收矩阵](docs/TEST_MATRIX.md) · [当前验证进度](docs/progress/2026-10-21-macos.md)。Mac 验证先行，移动端仍处于计划阶段。
+跨平台开发：[开发流程](docs/DEVELOPMENT.md) · [平台路线与进度](docs/ROADMAP.md) · [验收矩阵](docs/TEST_MATRIX.md) · [安卓发布验证](docs/progress/2026-10-25-android-release.md)。安卓已提供固定签名的公开预览；Mac 保持现有未公证预览，付费签名公证暂缓；iOS 尚未实现。
 
 ## 能做什么
 
@@ -40,9 +40,11 @@ python -m venv .venv
 
 Apple Silicon 与 Intel 的原生构建、离线 OCR 和原生窗口/API/SSE 自动检查已通过，人工交互和真实业务仍待验收；证据见 [当前验证记录](docs/progress/2026-10-21-macos.md)。源码运行、两种芯片架构的构建及测试包说明见 [macOS 指南](docs/MACOS.md)。测试包与正式签名、公证分别记录。
 
-## 安卓预览开发
+## 安卓预览版
 
-安卓版已进入原生验证，覆盖网络恢复、后台服务和手机/平板 UI；构建与设备适配范围见 [安卓指南](docs/ANDROID.md)，实际结果见 [阶段记录](docs/progress/2026-10-21-android.md)。真实业务与厂商后台策略仍需验收。
+[0.1.0 Preview 1 下载页](https://github.com/Eric10Z4/YNU-Course-Selection-Assistant/releases/tag/android-v0.1.0-preview.1) 提供 `YNU-Course-Assistant-0.1.0-preview.1.apk`，面向 Android 8.0/API 26 及以上的 64 位 ARM 手机/平板，并包含模拟器使用的 x86_64。安装包、来源记录和校验方法见 [下载与校验](docs/RELEASES.md)。
+
+安卓提供课程查询、串行限时任务、网络恢复核对、常驻通知停止、任务记录与手机/平板界面。API 26、35、36 的 x86_64 模拟器已完成离线自动检查，以及公开预览 APK 的全新安装和启动；ARM64 实体设备、真实学校业务、长时间锁屏和各厂商后台策略仍待验收。使用、更新与后台限制见 [安卓指南](docs/ANDROID.md)，确切提交和 CI 证据见 [发布记录](docs/progress/2026-10-25-android-release.md)。
 
 ## Linux 使用
 
@@ -61,7 +63,8 @@ python qiangke_cli.py batches
 ```text
 windows/           当前 V2.4 源码、找回的 OCR 模块、模型和构建资源
 macos/             macOS 入口、构建与离线/原生 GUI 验证
-tests/             桌面平台行为检查
+android/           安卓原生容器、Python 任务适配、构建与离线设备检查
+tests/             桌面行为、安卓恢复与发布检查
 linux/             原始 Linux 压缩包解出的文件
 archive/windows/   各版原始源码与两套打包工具，保持字节内容不变
 archive/linux/     原始 Linux 压缩包
@@ -77,6 +80,6 @@ CHANGELOG.md       依据逐版源码差异重建的更新日志
 
 ## 使用与配置
 
-本项目不是学校官方客户端。仅使用本人有权操作的账号，并遵守学校选课规则。保存的配置可能含明文密码或邮箱授权码，勿将实际配置、日志、Cookie 或抓包文件上传到仓库；`.gitignore` 已忽略常见文件。停止任务可用界面停止按钮或命令行中断。
+本项目不是学校官方客户端。仅使用本人有权操作的账号，并遵守学校选课规则。Windows/Linux 配置可能含明文密码或邮箱授权码；安卓密码默认只在当前进程，选择“记住密码”才经 Keystore 加密保存。勿将实际配置、日志、Cookie 或抓包文件上传到仓库；`.gitignore` 已忽略常见文件。停止任务可用界面停止按钮或命令行中断。
 
 本次验证范围见 [验证记录](docs/VALIDATION.md)。未进行真实登录、选课、退选或当前学期接口兼容性测试。原始代码及素材的授权说明见 [NOTICE](NOTICE.md)。
