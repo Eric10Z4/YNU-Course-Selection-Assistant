@@ -40,6 +40,10 @@ python -m venv .venv
 
 Apple Silicon 与 Intel 的原生构建、离线 OCR 和原生窗口/API/SSE 自动检查已通过，人工交互和真实业务仍待验收；证据见 [当前验证记录](docs/progress/2026-10-21-macos.md)。源码运行、两种芯片架构的构建及测试包说明见 [macOS 指南](docs/MACOS.md)。测试包与正式签名、公证分别记录。
 
+## 安卓预览开发
+
+安卓版已进入原生验证，覆盖网络恢复、后台服务和手机/平板 UI；构建与设备适配范围见 [安卓指南](docs/ANDROID.md)，实际结果见 [阶段记录](docs/progress/2026-10-21-android.md)。真实业务与厂商后台策略仍需验收。
+
 ## Linux 使用
 
 ```bash

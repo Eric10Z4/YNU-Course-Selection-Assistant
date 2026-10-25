@@ -1,0 +1,71 @@
+plugins { id 'com.android.application'; id 'com.chaquo.python' }
+
+android {
+    namespace 'io.github.eric10z4.ynu.android'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'io.github.eric10z4.ynu.android'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0-preview.1'
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    buildFeatures { buildConfig true }
+    signingConfigs {
+        preview {
+            if (System.getenv('ANDROID_PREVIEW_KEYSTORE_FILE')) {
+                storeFile file(System.getenv('ANDROID_PREVIEW_KEYSTORE_FILE'))
+                storePassword System.getenv('ANDROID_PREVIEW_STORE_PASSWORD')
+                keyAlias 'ynu-preview'
+                keyPassword System.getenv('ANDROID_PREVIEW_STORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            if (System.getenv('ANDROID_PREVIEW_KEYSTORE_FILE')) signingConfig signingConfigs.preview
+        }
+        preview {
+            initWith release
+            debuggable false
+            minifyEnabled false
+            signingConfig System.getenv('ANDROID_PREVIEW_KEYSTORE_FILE') ? signingConfigs.preview : signingConfigs.debug
+            matchingFallbacks = ['release']
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    sourceSets.main.assets.srcDir layout.buildDirectory.dir('generated/modelAssets')
+}
+chaquopy {
+    defaultConfig {
+        version = '3.13'
+        pip { install 'requests==2.32.5' }
+    }
+    sourceSets.main.srcDir layout.buildDirectory.dir('generated/sharedPython')
+    sourceSets.debug.srcDir layout.buildDirectory.dir('generated/debugPython')
+}
+tasks.register('copySharedEngine', Sync) {
+    from('../../windows') { include 'qiangke_web.py', 'desktop_support.py' }
+    into layout.buildDirectory.dir('generated/sharedPython')
+}
+tasks.register('copyOcrAssets', Sync) {
+    from('../../windows') { include 'ocr_model.onnx', 'ocr_charset.json' }
+    into layout.buildDirectory.dir('generated/modelAssets')
+}
+tasks.register('copyPolicyTests', Sync) {
+    from('../../tests') { include 'test_android.py' }
+    into layout.buildDirectory.dir('generated/debugPython')
+}
+tasks.configureEach {
+    if (name.toLowerCase().contains('python')) { dependsOn 'copySharedEngine', 'copyPolicyTests' }
+    if (name == 'preBuild') { dependsOn 'copyOcrAssets' }
+}
+dependencies {
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.23.2'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'junit:junit:4.13.2'
+}
